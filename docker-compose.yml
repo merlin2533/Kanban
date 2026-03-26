@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  kanban:
+    build: .
+    container_name: kanban
+    restart: unless-stopped
+    ports:
+      - "${PORT:-3000}:3000"
+    volumes:
+      - kanban-data:/data
+      - kanban-uploads:/app/uploads
+    environment:
+      - PORT=3000
+      - DB_PATH=/data/kanban.db
+      - BASE_URL=${BASE_URL:-http://localhost:3000}
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+
+volumes:
+  kanban-data:
+  kanban-uploads:

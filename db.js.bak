@@ -149,99 +149,6 @@ if (userCount === 0) {
   console.log('Default admin created - PLEASE CHANGE PASSWORD!');
 }
 
-// --- Auth helpers ---
-
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return { hash, salt };
-}
-
-function verifyPassword(password, hash, salt) {
-  const derived = crypto.scryptSync(password, salt, 64).toString('hex');
-  return crypto.timingSafeEqual(Buffer.from(derived, 'hex'), Buffer.from(hash, 'hex'));
-}
-
-function createUser(username, password, isAdmin = false) {
-  const { hash, salt } = hashPassword(password);
-  const result = db.prepare('INSERT INTO users (username, password_hash, password_salt, is_admin) VALUES (?, ?, ?, ?)').run(username, hash, salt, isAdmin ? 1 : 0);
-  return db.prepare('SELECT id, username, is_admin, password_changed_at, created_at FROM users WHERE id = ?').get(result.lastInsertRowid);
-}
-
-function authenticateUser(username, password) {
-  const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
-  if (!user) return null;
-  if (!verifyPassword(password, user.password_hash, user.password_salt)) return null;
-  return { id: user.id, username: user.username, is_admin: user.is_admin, password_changed_at: user.password_changed_at };
-}
-
-function changePassword(userId, newPassword) {
-  const { hash, salt } = hashPassword(newPassword);
-  db.prepare("UPDATE users SET password_hash = ?, password_salt = ?, password_changed_at = datetime('now') WHERE id = ?").run(hash, salt, userId);
-}
-
-function createSession(userId) {
-  const id = nanoid();
-  const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
-  db.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)').run(id, userId, expires);
-  return { id, expires_at: expires };
-}
-
-function getSession(sessionId) {
-  const session = db.prepare("SELECT s.*, u.username, u.is_admin, u.password_changed_at FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime('now')").get(sessionId);
-  return session || null;
-}
-
-function deleteSession(sessionId) {
-  db.prepare('DELETE FROM sessions WHERE id = ?').run(sessionId);
-}
-
-function cleanExpiredSessions() {
-  db.prepare("DELETE FROM sessions WHERE expires_at <= datetime('now')").run();
-}
-
-// --- Board access links ---
-
-function createBoardAccessLink(boardId, permission, label) {
-  const id = nanoid();
-  db.prepare('INSERT INTO board_access_links (id, board_id, permission, label) VALUES (?, ?, ?, ?)').run(id, boardId, permission || 'view', label || '');
-  logActivity(boardId, 'access_link_created', { permission, label });
-  return db.prepare('SELECT * FROM board_access_links WHERE id = ?').get(id);
-}
-
-function getBoardAccessLinks(boardId) {
-  return db.prepare('SELECT * FROM board_access_links WHERE board_id = ? ORDER BY created_at').all(boardId);
-}
-
-function getBoardAccessLink(linkId) {
-  return db.prepare('SELECT * FROM board_access_links WHERE id = ?').get(linkId);
-}
-
-function deleteBoardAccessLink(id) {
-  const link = db.prepare('SELECT * FROM board_access_links WHERE id = ?').get(id);
-  if (link) db.prepare('DELETE FROM board_access_links WHERE id = ?').run(id);
-  return link;
-}
-
-function getUserBoards(userId) {
-  // Admin sees all boards
-  const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
-  if (user && user.is_admin) {
-    return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
-  }
-  return [];
-}
-
-function getUsers() {
-  return db.prepare('SELECT id, username, is_admin, password_changed_at, created_at FROM users').all();
-}
-
-function deleteUser(id) {
-  const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
-  if (user) db.prepare('DELETE FROM users WHERE id = ?').run(id);
-  return user;
-}
-
 // --- Helpers ---
 
 function logActivity(boardId, action, details) {
@@ -779,32 +686,15 @@ function importBoard(data) {
 }
 
 module.exports = {
-  // Boards
   createBoard, getBoard, updateBoard, deleteBoard, getBoards,
-  // Columns
   createColumn, updateColumn, deleteColumn, moveColumn,
-  getColumnBoardId, getCardBoardId,
-  // Cards
   createCard, updateCard, deleteCard, moveCard,
-  // Checklist
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
-  // Attachments
   createAttachment, getAttachment, deleteAttachment,
-  // Labels
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
-  // Activity
   getActivity,
-  // Archive
   archiveCard, restoreCard, getArchivedCards,
-  // Comments
   getComments, createComment, deleteComment,
-  // Export/Import
   exportBoard, importBoard,
-  // Auth
-  hashPassword, verifyPassword, createUser, authenticateUser, changePassword,
-  createSession, getSession, deleteSession, cleanExpiredSessions,
-  // Board access links
-  createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
-  // User management
-  getUserBoards, getUsers, deleteUser,
+  getColumnBoardId, getCardBoardId
 };

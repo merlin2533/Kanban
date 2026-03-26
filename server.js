@@ -71,6 +71,135 @@ function validString(val, max) {
   return t;
 }
 
+// --- Cookie parsing ---
+function parseCookies(req) {
+  const cookies = {};
+  const header = req.headers.cookie;
+  if (!header) return cookies;
+  header.split(';').forEach(c => {
+    const [key, ...val] = c.trim().split('=');
+    if (key) cookies[key.trim()] = decodeURIComponent(val.join('='));
+  });
+  return cookies;
+}
+
+// --- Auth middleware ---
+function authMiddleware(req, res, next) {
+  const accessToken = req.query.token;
+  if (accessToken) {
+    const link = db.getBoardAccessLink(accessToken);
+    if (link) {
+      req.accessLink = link;
+      req.permission = link.permission;
+      return next();
+    }
+  }
+  const cookies = parseCookies(req);
+  const sessionId = cookies.kanban_session;
+  if (sessionId) {
+    const session = db.getSession(sessionId);
+    if (session) {
+      req.user = { id: session.user_id, username: session.username, is_admin: session.is_admin, password_changed_at: session.password_changed_at };
+      req.permission = 'admin';
+      return next();
+    }
+  }
+  return res.status(401).json({ error: 'Authentication required' });
+}
+
+function requireEdit(req, res, next) {
+  if (req.permission === 'admin' || req.permission === 'edit') return next();
+  return res.status(403).json({ error: 'Edit permission required' });
+}
+
+// --- Auth Routes ---
+app.post('/api/auth/login', (req, res) => {
+  const { username, password } = req.body || {};
+  if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  const user = db.authenticateUser(username, password);
+  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+  const session = db.createSession(user.id);
+  res.setHeader('Set-Cookie', `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}`);
+  const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
+  res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 });
+});
+
+app.post('/api/auth/logout', (req, res) => {
+  const cookies = parseCookies(req);
+  if (cookies.kanban_session) db.deleteSession(cookies.kanban_session);
+  res.setHeader('Set-Cookie', 'kanban_session=; Path=/; HttpOnly; Max-Age=0');
+  res.json({ ok: true });
+});
+
+app.get('/api/auth/me', (req, res) => {
+  const cookies = parseCookies(req);
+  const sessionId = cookies.kanban_session;
+  if (!sessionId) return res.status(401).json({ error: 'Not authenticated' });
+  const session = db.getSession(sessionId);
+  if (!session) return res.status(401).json({ error: 'Session expired' });
+  const pwAge = session.password_changed_at ? (Date.now() - new Date(session.password_changed_at + 'Z').getTime()) / 86400000 : 999;
+  res.json({ user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
+});
+
+app.post('/api/auth/change-password', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const { currentPassword, newPassword } = req.body || {};
+  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Both passwords required' });
+  if (newPassword.length < 6) return res.status(400).json({ error: 'Min 6 characters' });
+  const user = db.authenticateUser(req.user.username, currentPassword);
+  if (!user) return res.status(401).json({ error: 'Current password incorrect' });
+  db.changePassword(req.user.id, newPassword);
+  res.json({ ok: true });
+});
+
+// --- Admin ---
+app.get('/api/admin/users', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  res.json(db.getUsers());
+});
+
+app.post('/api/admin/users', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const username = validString(req.body.username, 100);
+  if (!username) return res.status(400).json({ error: 'username required' });
+  if (!req.body.password || req.body.password.length < 6) return res.status(400).json({ error: 'password min 6 chars' });
+  try {
+    const user = db.createUser(username, req.body.password, !!req.body.is_admin);
+    res.status(201).json(user);
+  } catch { res.status(409).json({ error: 'Username already exists' }); }
+});
+
+app.delete('/api/admin/users/:id', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  if (req.user.id === id) return res.status(400).json({ error: 'Cannot delete yourself' });
+  const user = db.deleteUser(id);
+  if (!user) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+// --- Board Access Links ---
+app.get('/api/boards/:boardId/access-links', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  res.json(db.getBoardAccessLinks(req.params.boardId));
+});
+
+app.post('/api/boards/:boardId/access-links', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const permission = req.body.permission === 'edit' ? 'edit' : 'view';
+  const label = validString(req.body.label, 200) || '';
+  const link = db.createBoardAccessLink(req.params.boardId, permission, label);
+  res.status(201).json(link);
+});
+
+app.delete('/api/access-links/:id', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const link = db.deleteBoardAccessLink(req.params.id);
+  if (!link) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
 // --- SSE ---
 const sseClients = new Map(); // boardId -> Set of response objects
 
@@ -120,11 +249,18 @@ app.get('/board/:boardId', (req, res) => {
 // === API Routes ===
 
 // --- Boards ---
-app.get('/api/boards', (req, res) => {
-  res.json(db.getBoards());
+app.get('/api/boards', authMiddleware, (req, res) => {
+  if (req.user) {
+    res.json(db.getBoards());
+  } else if (req.accessLink) {
+    const board = db.getBoard(req.accessLink.board_id);
+    res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
+  } else {
+    res.json([]);
+  }
 });
 
-app.post('/api/boards', (req, res) => {
+app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
   let title = req.body.title;
   if (title !== undefined) {
     title = validString(title, 200);
@@ -134,7 +270,7 @@ app.post('/api/boards', (req, res) => {
   res.status(201).json(board);
 });
 
-app.get('/api/boards/:boardId', (req, res) => {
+app.get('/api/boards/:boardId', authMiddleware, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const board = db.getBoard(id);
@@ -142,7 +278,7 @@ app.get('/api/boards/:boardId', (req, res) => {
   res.json(board);
 });
 
-app.patch('/api/boards/:boardId', (req, res) => {
+app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const title = validString(req.body.title, 200);
@@ -153,7 +289,7 @@ app.patch('/api/boards/:boardId', (req, res) => {
   res.json(board);
 });
 
-app.delete('/api/boards/:boardId', (req, res) => {
+app.delete('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const board = db.deleteBoard(id);
@@ -163,7 +299,7 @@ app.delete('/api/boards/:boardId', (req, res) => {
 });
 
 // --- Export / Import ---
-app.get('/api/boards/:boardId/export', (req, res) => {
+app.get('/api/boards/:boardId/export', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
   const data = db.exportBoard(boardId);
   if (!data) return res.status(404).json({ error: 'Board not found' });
@@ -172,20 +308,20 @@ app.get('/api/boards/:boardId/export', (req, res) => {
   res.json(data);
 });
 
-app.post('/api/boards/import', (req, res) => {
+app.post('/api/boards/import', authMiddleware, requireEdit, (req, res) => {
   if (!req.body || !req.body.title) return res.status(400).json({ error: 'Invalid board data' });
   const board = db.importBoard(req.body);
   res.status(201).json(board);
 });
 
 // --- Archived cards ---
-app.get('/api/boards/:boardId/archived', (req, res) => {
+app.get('/api/boards/:boardId/archived', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
   res.json(db.getArchivedCards(boardId));
 });
 
 // --- Columns ---
-app.post('/api/boards/:boardId/columns', (req, res) => {
+app.post('/api/boards/:boardId/columns', authMiddleware, requireEdit, (req, res) => {
   const boardId = req.params.boardId;
   if (!boardId) return res.status(400).json({ error: 'Invalid ID' });
   let title = req.body.title;
@@ -201,7 +337,7 @@ app.post('/api/boards/:boardId/columns', (req, res) => {
   res.status(201).json(col);
 });
 
-app.patch('/api/columns/:columnId', (req, res) => {
+app.patch('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const title = validString(req.body.title, 1000);
@@ -212,7 +348,7 @@ app.patch('/api/columns/:columnId', (req, res) => {
   res.json(col);
 });
 
-app.delete('/api/columns/:columnId', (req, res) => {
+app.delete('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const col = db.deleteColumn(id);
@@ -221,7 +357,7 @@ app.delete('/api/columns/:columnId', (req, res) => {
   res.json({ ok: true });
 });
 
-app.put('/api/columns/:columnId/move', (req, res) => {
+app.put('/api/columns/:columnId/move', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const position = Number(req.body.position);
@@ -233,7 +369,7 @@ app.put('/api/columns/:columnId/move', (req, res) => {
 });
 
 // --- Cards ---
-app.post('/api/columns/:columnId/cards', (req, res) => {
+app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, (req, res) => {
   const columnId = validId(req.params.columnId);
   if (!columnId) return res.status(400).json({ error: 'Invalid ID' });
   let text = req.body.text;
@@ -250,7 +386,7 @@ app.post('/api/columns/:columnId/cards', (req, res) => {
   res.status(201).json(card);
 });
 
-app.patch('/api/cards/:cardId', (req, res) => {
+app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const updates = {};
@@ -279,7 +415,7 @@ app.patch('/api/cards/:cardId', (req, res) => {
   res.json(card);
 });
 
-app.delete('/api/cards/:cardId', (req, res) => {
+app.delete('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   // Fetch boardId before deletion since the card will be gone after
@@ -290,7 +426,7 @@ app.delete('/api/cards/:cardId', (req, res) => {
   res.json({ ok: true });
 });
 
-app.put('/api/cards/:cardId/move', (req, res) => {
+app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const columnId = Number(req.body.columnId);
@@ -306,7 +442,7 @@ app.put('/api/cards/:cardId/move', (req, res) => {
 });
 
 // --- Archive ---
-app.put('/api/cards/:cardId/archive', (req, res) => {
+app.put('/api/cards/:cardId/archive', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const card = db.archiveCard(id);
@@ -316,7 +452,7 @@ app.put('/api/cards/:cardId/archive', (req, res) => {
   res.json(card);
 });
 
-app.put('/api/cards/:cardId/restore', (req, res) => {
+app.put('/api/cards/:cardId/restore', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const card = db.restoreCard(id);
