@@ -596,20 +596,24 @@ app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
 app.put('/api/cards/:cardId/archive', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const boardId = db.getCardBoardId(id);
+  if (!boardId) return res.status(404).json({ error: 'Card not found' });
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'Access denied' });
   const card = db.archiveCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
-  const boardId = db.getColumnBoardId(card.column_id);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_archived' });
+  broadcast(boardId, { type: 'update', action: 'card_archived' });
   res.json(card);
 });
 
 app.put('/api/cards/:cardId/restore', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const boardId = db.getCardBoardId(id);
+  if (!boardId) return res.status(404).json({ error: 'Card not found' });
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'Access denied' });
   const card = db.restoreCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
-  const boardId = db.getColumnBoardId(card.column_id);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_restored' });
+  broadcast(boardId, { type: 'update', action: 'card_restored' });
   res.json(card);
 });
 
@@ -800,7 +804,15 @@ app.get('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
 app.post('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
   if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
   const url = req.body.url;
-  if (!url || typeof url !== 'string' || !url.startsWith('http')) return res.status(400).json({ error: 'Valid URL required' });
+  if (!url || typeof url !== 'string') return res.status(400).json({ error: 'Valid URL required' });
+  let parsed;
+  try { parsed = new URL(url); } catch { return res.status(400).json({ error: 'Valid URL required' }); }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return res.status(400).json({ error: 'Valid URL required' });
+  // Block SSRF: private/loopback IP ranges
+  const host = parsed.hostname;
+  if (/^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) || host === '::1') {
+    return res.status(400).json({ error: 'Private URLs not allowed' });
+  }
   const events = typeof req.body.events === 'string' ? req.body.events : '*';
   const wh = db.createWebhook(req.params.boardId, url, events);
   res.status(201).json(wh);
