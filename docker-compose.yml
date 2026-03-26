@@ -1,6 +1,6 @@
 services:
   kanban:
-    image: ${IMAGE:-merlin2533/kanban:latest}
+    image: ${IMAGE:-merlin2539/kanban:latest}
     build: .
     container_name: kanban
     restart: unless-stopped
