@@ -87,18 +87,14 @@
     </form>
   </div>
   <script>
-    // Check if already logged in (skip if we were just redirected here due to auth failure)
-    if (!sessionStorage.getItem('authRedirect')) {
-      fetch('/api/auth/me').then(r => {
-        if (r.ok) {
-          let redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
-          if (!redirect.startsWith('/') || redirect.startsWith('//')) redirect = '/';
-          window.location.href = redirect;
-        }
-      });
-    } else {
-      sessionStorage.removeItem('authRedirect');
-    }
+    // Check if already logged in (uses /status so no 401 appears in the console)
+    fetch('/api/auth/status').then(r => r.json()).then(data => {
+      if (data.authenticated) {
+        let redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        if (!redirect.startsWith('/') || redirect.startsWith('//')) redirect = '/';
+        window.location.href = redirect;
+      }
+    }).catch(() => {});
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();

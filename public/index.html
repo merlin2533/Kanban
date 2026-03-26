@@ -156,7 +156,7 @@
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
         body: JSON.stringify({ title })
       });
-      if (!res.ok) return;
+      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Board erstellen fehlgeschlagen'); return; }
       const board = await res.json();
       window.location.href = '/board/' + board.id;
     });
@@ -219,7 +219,7 @@
             if (!title) return;
             const res = await fetch('/api/templates/' + t.id + '/create-board', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
               body: JSON.stringify({ title })
             });
             if (res.ok) {
@@ -245,6 +245,7 @@
           headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
           body: JSON.stringify(data)
         });
+        if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'Import fehlgeschlagen');
         const board = await res.json();
         window.location.href = '/board/' + board.id;
       } catch (err) {
