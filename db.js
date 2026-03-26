@@ -140,6 +140,13 @@ try {
   db.exec("ALTER TABLE cards ADD COLUMN archived INTEGER DEFAULT 0");
 }
 
+// Migration: add wip_limit column if missing
+try {
+  db.prepare("SELECT wip_limit FROM columns LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE columns ADD COLUMN wip_limit INTEGER DEFAULT 0");
+}
+
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 if (userCount === 0) {
   const adminPw = process.env.ADMIN_PASSWORD || 'admin';
@@ -393,11 +400,15 @@ function createColumn(boardId, title) {
   return db.prepare('SELECT * FROM columns WHERE id = ?').get(result.lastInsertRowid);
 }
 
-function updateColumn(id, title) {
-  db.prepare('UPDATE columns SET title = ? WHERE id = ?').run(title, id);
+function updateColumn(id, updates) {
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(id);
-  if (col) logActivity(col.board_id, 'column_updated', { columnId: id, title });
-  return col;
+  if (!col) return null;
+  const title = updates.title !== undefined ? updates.title : col.title;
+  const wip_limit = updates.wip_limit !== undefined ? updates.wip_limit : col.wip_limit;
+  db.prepare('UPDATE columns SET title = ?, wip_limit = ? WHERE id = ?').run(title, wip_limit, id);
+  const updated = db.prepare('SELECT * FROM columns WHERE id = ?').get(id);
+  logActivity(col.board_id, 'column_updated', { columnId: id, title });
+  return updated;
 }
 
 // Fix #6: deleteColumn resequences sibling positions after delete

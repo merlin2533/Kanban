@@ -344,11 +344,21 @@ app.post('/api/boards/:boardId/columns', authMiddleware, requireEdit, (req, res)
 app.patch('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const title = validString(req.body.title, 1000);
-  if (title === null) return res.status(400).json({ error: 'title must be a non-empty string max 1000 chars' });
-  const col = db.updateColumn(id, title);
+  const updates = {};
+  if (req.body.title !== undefined) {
+    const title = validString(req.body.title, 1000);
+    if (title === null) return res.status(400).json({ error: 'title must be a non-empty string' });
+    updates.title = title;
+  }
+  if (req.body.wip_limit !== undefined) {
+    const wl = Number(req.body.wip_limit);
+    updates.wip_limit = Number.isInteger(wl) && wl >= 0 ? wl : 0;
+  }
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates' });
+  const col = db.updateColumn(id, updates);
   if (!col) return res.status(404).json({ error: 'Column not found' });
-  broadcast(col.board_id, { type: 'update', action: 'column_updated' });
+  // broadcast if possible
+  if (col.board_id) broadcast(col.board_id, { type: 'update', action: 'column_updated' });
   res.json(col);
 });
 
