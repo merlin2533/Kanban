@@ -8,7 +8,7 @@
 
 services:
   kanban:
-    image: ${IMAGE:-ghcr.io/merlin2533/kanban:latest}
+    image: ${IMAGE:-merlin2533/kanban:latest}
     ports:
       - target: 3000
         published: ${PORT:-3000}
