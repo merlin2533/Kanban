@@ -944,6 +944,14 @@ function setupModal() {
   document.getElementById('commentInput').onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }
   };
+  // Markdown hint below comment input
+  const addCommentBtn = document.getElementById('addCommentBtn');
+  if (addCommentBtn) {
+    const hint = document.createElement('small');
+    hint.style.cssText = 'color:#94a3b8;font-size:11px;display:block;margin-top:4px;';
+    hint.textContent = 'Markdown: **fett**, *kursiv*, `code`, [Link](url)';
+    addCommentBtn.closest('.add-row').insertAdjacentElement('afterend', hint);
+  }
 
   // Labels
   const addLabelBtn = document.getElementById('addLabelBtn');
@@ -991,9 +999,36 @@ function setupModal() {
       loadBoard();
     } catch (e) { showError(e.message); }
   });
+
+  // Priority buttons
+  document.querySelectorAll('.priority-btn').forEach(btn => {
+    btn.onclick = async () => {
+      if (!currentCardId) return;
+      const priority = btn.dataset.priority || null;
+      try {
+        await api(`/api/cards/${currentCardId}`, 'PATCH', { priority });
+        document.querySelectorAll('.priority-btn').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+      } catch (e) { showError(e.message); }
+    };
+  });
+
+  // Assignee select
+  document.getElementById('assignUserSelect').onchange = async () => {
+    const select = document.getElementById('assignUserSelect');
+    const userId = Number(select.value);
+    if (!userId || !currentCardId) return;
+    select.value = '';
+    try {
+      await api(`/api/cards/${currentCardId}/assignees/${userId}`, 'POST');
+      board = await api(`/api/boards/${boardId}`);
+      const card = findCard(currentCardId);
+      if (card) renderAssignees(card.assignees || []);
+    } catch (e) { showError(e.message); }
+  };
 }
 
-function openCardModal(card) {
+async function openCardModal(card) {
   currentCardId = card.id;
   document.getElementById('modalCardText').value = card.text;
   const descArea = document.getElementById('modalDescription');
@@ -1002,10 +1037,34 @@ function openCardModal(card) {
   if (dueDateInput) {
     dueDateInput.value = card.due_date || '';
   }
+  // Priority
+  document.querySelectorAll('.priority-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.priority === (card.priority || ''));
+  });
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
   renderCardLabels(card.labels || []);
   renderComments(card.comments || []);
+  // Assignees
+  renderAssignees(card.assignees || []);
+  const assignSelect = document.getElementById('assignUserSelect');
+  if (assignSelect) {
+    assignSelect.innerHTML = '<option value="">+ Benutzer zuweisen...</option>';
+    try {
+      if (currentUser && currentUser.is_admin) {
+        const users = await api('/api/admin/users');
+        const assigned = new Set((card.assignees || []).map(a => a.id));
+        for (const u of users) {
+          if (!assigned.has(u.id)) {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = u.username;
+            assignSelect.appendChild(opt);
+          }
+        }
+      }
+    } catch {}
+  }
   const moveSelect = document.getElementById('moveColumnSelect');
   if (moveSelect && board) {
     moveSelect.innerHTML = '';
@@ -1327,6 +1386,57 @@ function findCard(cardId) {
   return null;
 }
 
+function stringToColor(str) {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  const h = hash % 360;
+  return `hsl(${h}, 60%, 45%)`;
+}
+
+function renderAssignees(assignees) {
+  const container = document.getElementById('cardAssignees');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const a of assignees) {
+    const tag = document.createElement('span');
+    tag.className = 'assignee-tag';
+    const initial = document.createElement('span');
+    initial.className = 'assignee-initial';
+    initial.textContent = a.username.charAt(0).toUpperCase();
+    initial.style.background = stringToColor(a.username);
+    tag.appendChild(initial);
+    const name = document.createElement('span');
+    name.textContent = a.username;
+    tag.appendChild(name);
+    const rm = document.createElement('button');
+    rm.className = 'remove-label';
+    rm.innerHTML = '&times;';
+    rm.onclick = async () => {
+      try {
+        await api(`/api/cards/${currentCardId}/assignees/${a.id}`, 'DELETE');
+        board = await api(`/api/boards/${boardId}`);
+        const card = findCard(currentCardId);
+        if (card) renderAssignees(card.assignees || []);
+      } catch (e) { showError(e.message); }
+    };
+    tag.appendChild(rm);
+    container.appendChild(tag);
+  }
+}
+
+function renderMarkdown(text) {
+  if (!text) return '';
+  return text
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.+?)\*/g, '<em>$1</em>')
+    .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/^- (.+)$/gm, '<li>$1</li>')
+    .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
+    .replace(/\n/g, '<br>');
+}
+
 function formatSize(bytes) {
   if (!bytes) return '';
   if (bytes < 1024) return bytes + ' B';
@@ -1469,7 +1579,7 @@ function renderComments(comments) {
 
     const text = document.createElement('div');
     text.className = 'comment-text';
-    text.textContent = comment.text;
+    text.innerHTML = renderMarkdown(comment.text);
 
     const footer = document.createElement('div');
     footer.className = 'comment-footer';

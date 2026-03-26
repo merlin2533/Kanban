@@ -117,6 +117,31 @@ db.exec(`
 
   CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_board_access_board_id ON board_access_links(board_id);
+
+  CREATE TABLE IF NOT EXISTS card_assignees (
+    card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    PRIMARY KEY (card_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_card_assignees_card_id ON card_assignees(card_id);
+  CREATE INDEX IF NOT EXISTS idx_card_assignees_user_id ON card_assignees(user_id);
+
+  CREATE TABLE IF NOT EXISTS webhooks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    url TEXT NOT NULL,
+    events TEXT DEFAULT '*',
+    active INTEGER DEFAULT 1,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_webhooks_board_id ON webhooks(board_id);
+
+  CREATE TABLE IF NOT EXISTS board_templates (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    columns_json TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
 `);
 
 // Migration: add description column if missing
@@ -145,6 +170,13 @@ try {
   db.prepare("SELECT wip_limit FROM columns LIMIT 1").get();
 } catch {
   db.exec("ALTER TABLE columns ADD COLUMN wip_limit INTEGER DEFAULT 0");
+}
+
+// Migration: add priority column if missing
+try {
+  db.prepare("SELECT priority FROM cards LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE cards ADD COLUMN priority TEXT DEFAULT NULL");
 }
 
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
@@ -292,6 +324,7 @@ function getBoard(id) {
   let allAttachments = [];
   let allCardLabels = [];
   let allComments = [];
+  let allAssignees = [];
 
   if (cardIds.length > 0) {
     const cardPlaceholders = cardIds.map(() => '?').join(',');
@@ -306,6 +339,9 @@ function getBoard(id) {
     ).all(...cardIds);
     allComments = db.prepare(
       `SELECT * FROM comments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at ASC`
+    ).all(...cardIds);
+    allAssignees = db.prepare(
+      `SELECT ca.card_id, u.id, u.username FROM card_assignees ca JOIN users u ON ca.user_id = u.id WHERE ca.card_id IN (${cardPlaceholders})`
     ).all(...cardIds);
   }
 
@@ -334,12 +370,19 @@ function getBoard(id) {
     commentsByCard.get(c.card_id).push(c);
   }
 
+  const assigneesByCard = new Map();
+  for (const a of allAssignees) {
+    if (!assigneesByCard.has(a.card_id)) assigneesByCard.set(a.card_id, []);
+    assigneesByCard.get(a.card_id).push({ id: a.id, username: a.username });
+  }
+
   const cardsByColumn = new Map();
   for (const card of allCards) {
     card.checklist = checklistByCard.get(card.id) || [];
     card.attachments = attachmentsByCard.get(card.id) || [];
     card.labels = labelsByCard.get(card.id) || [];
     card.comments = commentsByCard.get(card.id) || [];
+    card.assignees = assigneesByCard.get(card.id) || [];
     if (!cardsByColumn.has(card.column_id)) cardsByColumn.set(card.column_id, []);
     cardsByColumn.get(card.column_id).push(card);
   }
@@ -466,8 +509,9 @@ function updateCard(id, updates) {
   const text = updates.text !== undefined ? updates.text : card.text;
   const description = updates.description !== undefined ? updates.description : card.description;
   const due_date = updates.due_date !== undefined ? updates.due_date : card.due_date;
+  const priority = updates.priority !== undefined ? updates.priority : card.priority;
 
-  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, id);
+  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, id);
 
   const updated = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(updated.column_id);
@@ -675,6 +719,22 @@ function getCardLabels(cardId) {
   return db.prepare('SELECT l.* FROM labels l JOIN card_labels cl ON l.id = cl.label_id WHERE cl.card_id = ? ORDER BY l.name').all(cardId);
 }
 
+// --- Card Assignees ---
+
+function assignCard(cardId, userId) {
+  db.prepare('INSERT OR IGNORE INTO card_assignees (card_id, user_id) VALUES (?, ?)').run(cardId, userId);
+  return true;
+}
+
+function unassignCard(cardId, userId) {
+  db.prepare('DELETE FROM card_assignees WHERE card_id = ? AND user_id = ?').run(cardId, userId);
+  return true;
+}
+
+function getCardAssignees(cardId) {
+  return db.prepare('SELECT u.id, u.username FROM users u JOIN card_assignees ca ON u.id = ca.user_id WHERE ca.card_id = ?').all(cardId);
+}
+
 // --- Archive ---
 
 function archiveCard(id) {
@@ -797,6 +857,71 @@ function importBoard(data) {
   return getBoard(id);
 }
 
+// --- Webhooks ---
+
+function createWebhook(boardId, url, events) {
+  const result = db.prepare('INSERT INTO webhooks (board_id, url, events) VALUES (?, ?, ?)').run(boardId, url, events || '*');
+  return db.prepare('SELECT * FROM webhooks WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function getWebhooks(boardId) {
+  return db.prepare('SELECT * FROM webhooks WHERE board_id = ? ORDER BY created_at').all(boardId);
+}
+
+function deleteWebhook(id) {
+  const wh = db.prepare('SELECT * FROM webhooks WHERE id = ?').get(id);
+  if (wh) db.prepare('DELETE FROM webhooks WHERE id = ?').run(id);
+  return wh;
+}
+
+function getActiveWebhooks(boardId) {
+  return db.prepare('SELECT * FROM webhooks WHERE board_id = ? AND active = 1').all(boardId);
+}
+
+// --- Board Templates ---
+
+function createTemplate(name, columnsJson) {
+  const result = db.prepare('INSERT INTO board_templates (name, columns_json) VALUES (?, ?)').run(name, columnsJson);
+  return db.prepare('SELECT * FROM board_templates WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function getTemplates() {
+  return db.prepare('SELECT * FROM board_templates ORDER BY name').all();
+}
+
+function deleteTemplate(id) {
+  const t = db.prepare('SELECT * FROM board_templates WHERE id = ?').get(id);
+  if (t) db.prepare('DELETE FROM board_templates WHERE id = ?').run(id);
+  return t;
+}
+
+function createBoardFromTemplate(templateId, title) {
+  const template = db.prepare('SELECT * FROM board_templates WHERE id = ?').get(templateId);
+  if (!template) return null;
+  const columns = JSON.parse(template.columns_json);
+  const id = nanoid();
+  const create = db.transaction(() => {
+    db.prepare('INSERT INTO boards (id, title) VALUES (?, ?)').run(id, title || template.name);
+    columns.forEach((col, i) => {
+      db.prepare('INSERT INTO columns (board_id, title, position, wip_limit) VALUES (?, ?, ?, ?)').run(id, col.title, i, col.wip_limit || 0);
+    });
+    logActivity(id, 'board_created', { title: title || template.name, template: template.name });
+  });
+  create();
+  return getBoard(id);
+}
+
+function saveBoardAsTemplate(boardId, name) {
+  const board = getBoard(boardId);
+  if (!board) return null;
+  const columns = board.columns.map(c => ({ title: c.title, wip_limit: c.wip_limit || 0 }));
+  return createTemplate(name, JSON.stringify(columns));
+}
+
+// --- Raw DB access ---
+
+function getDb() { return db; }
+
 module.exports = {
   // Boards
   createBoard, getBoard, updateBoard, deleteBoard, getBoards,
@@ -811,6 +936,8 @@ module.exports = {
   createAttachment, getAttachment, deleteAttachment, getCardAttachmentPaths, getBoardAttachmentPaths,
   // Labels
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
+  // Card Assignees
+  assignCard, unassignCard, getCardAssignees,
   // Activity
   getActivity,
   // Archive
@@ -826,4 +953,10 @@ module.exports = {
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
   getAllBoards, getUsers, deleteUser,
+  // Webhooks
+  createWebhook, getWebhooks, deleteWebhook, getActiveWebhooks,
+  // Board Templates
+  createTemplate, getTemplates, deleteTemplate, createBoardFromTemplate, saveBoardAsTemplate,
+  // Raw DB
+  getDb,
 };

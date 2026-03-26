@@ -2,6 +2,8 @@ const express = require('express');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const http = require('http');
+const https = require('https');
 const db = require('./db');
 
 const app = express();
@@ -260,6 +262,24 @@ app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => 
 
 // --- SSE ---
 const sseClients = new Map(); // boardId -> Set of response objects
+const boardPresence = new Map(); // boardId -> Map(username -> { username, connectedAt })
+
+// --- Webhook trigger ---
+function triggerWebhooks(boardId, event) {
+  const webhooks = db.getActiveWebhooks(boardId);
+  for (const wh of webhooks) {
+    if (wh.events !== '*' && !wh.events.split(',').includes(event.action)) continue;
+    const payload = JSON.stringify({ board_id: boardId, ...event, timestamp: new Date().toISOString() });
+    try {
+      const url = new URL(wh.url);
+      const mod = url.protocol === 'https:' ? https : http;
+      const req = mod.request(url, { method: 'POST', headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(payload) } });
+      req.on('error', () => {});
+      req.write(payload);
+      req.end();
+    } catch {}
+  }
+}
 
 app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
@@ -276,6 +296,13 @@ app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
   if (!sseClients.has(boardId)) sseClients.set(boardId, new Set());
   sseClients.get(boardId).add(res);
 
+  // Track presence
+  if (req.user) {
+    if (!boardPresence.has(boardId)) boardPresence.set(boardId, new Map());
+    boardPresence.get(boardId).set(req.user.username, { username: req.user.username, connectedAt: new Date().toISOString() });
+    broadcast(boardId, { type: 'presence', users: [...(boardPresence.get(boardId) || new Map()).values()] });
+  }
+
   // SSE keepalive every 30s to prevent proxy timeouts
   const keepalive = setInterval(() => {
     try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
@@ -288,6 +315,14 @@ app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
       clients.delete(res);
       if (clients.size === 0) sseClients.delete(boardId);
     }
+    if (req.user) {
+      const presence = boardPresence.get(boardId);
+      if (presence) {
+        presence.delete(req.user.username);
+        if (presence.size === 0) boardPresence.delete(boardId);
+        else broadcast(boardId, { type: 'presence', users: [...presence.values()] });
+      }
+    }
   });
 });
 
@@ -298,6 +333,7 @@ function broadcast(boardId, event) {
   for (const client of clients) {
     try { client.write(data); } catch { clients.delete(client); }
   }
+  triggerWebhooks(boardId, event);
 }
 
 // --- Board page route ---
@@ -484,6 +520,10 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
     } else {
       return res.status(400).json({ error: 'due_date must be ISO date string or null' });
     }
+  }
+  if (req.body.priority !== undefined) {
+    const valid = [null, 'low', 'medium', 'high'];
+    updates.priority = valid.includes(req.body.priority) ? req.body.priority : null;
   }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
   const card = db.updateCard(id, updates);
@@ -699,6 +739,110 @@ app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
   const boardId = db.getCardBoardId(att.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_deleted' });
   res.json({ ok: true });
+});
+
+// --- Card Assignees ---
+app.post('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, (req, res) => {
+  const cardId = validId(req.params.cardId);
+  const userId = validId(req.params.userId);
+  if (!cardId || !userId) return res.status(400).json({ error: 'Invalid ID' });
+  db.assignCard(cardId, userId);
+  const boardId = db.getCardBoardId(cardId);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_assigned' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, (req, res) => {
+  const cardId = validId(req.params.cardId);
+  const userId = validId(req.params.userId);
+  if (!cardId || !userId) return res.status(400).json({ error: 'Invalid ID' });
+  db.unassignCard(cardId, userId);
+  const boardId = db.getCardBoardId(cardId);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_unassigned' });
+  res.json({ ok: true });
+});
+
+// --- Webhooks ---
+app.get('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  res.json(db.getWebhooks(req.params.boardId));
+});
+
+app.post('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const url = req.body.url;
+  if (!url || typeof url !== 'string' || !url.startsWith('http')) return res.status(400).json({ error: 'Valid URL required' });
+  const events = typeof req.body.events === 'string' ? req.body.events : '*';
+  const wh = db.createWebhook(req.params.boardId, url, events);
+  res.status(201).json(wh);
+});
+
+app.delete('/api/webhooks/:id', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const wh = db.deleteWebhook(id);
+  if (!wh) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+// --- DB Backup ---
+app.get('/api/admin/backup', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const dbPath = process.env.DB_PATH || path.join(__dirname, 'kanban.db');
+  try { db.getDb().pragma('wal_checkpoint(TRUNCATE)'); } catch {}
+  res.download(dbPath, 'kanban-backup.db', (err) => {
+    if (err && !res.headersSent) res.status(500).json({ error: 'Backup failed' });
+  });
+});
+
+// --- Board Templates ---
+app.get('/api/templates', authMiddleware, (req, res) => {
+  res.json(db.getTemplates());
+});
+
+app.post('/api/templates', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const name = validString(req.body.name, 200);
+  if (!name) return res.status(400).json({ error: 'name required' });
+  if (!req.body.columns || !Array.isArray(req.body.columns)) return res.status(400).json({ error: 'columns array required' });
+  const t = db.createTemplate(name, JSON.stringify(req.body.columns));
+  res.status(201).json(t);
+});
+
+app.post('/api/boards/:boardId/save-template', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const name = validString(req.body.name, 200);
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const t = db.saveBoardAsTemplate(req.params.boardId, name);
+  if (!t) return res.status(404).json({ error: 'Board not found' });
+  res.status(201).json(t);
+});
+
+app.post('/api/templates/:id/create-board', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const title = validString(req.body.title, 200) || '';
+  const board = db.createBoardFromTemplate(id, title);
+  if (!board) return res.status(404).json({ error: 'Template not found' });
+  res.status(201).json(board);
+});
+
+app.delete('/api/templates/:id', authMiddleware, (req, res) => {
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const t = db.deleteTemplate(id);
+  if (!t) return res.status(404).json({ error: 'Not found' });
+  res.json({ ok: true });
+});
+
+// --- Presence ---
+app.get('/api/boards/:boardId/presence', authMiddleware, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
+  const presence = boardPresence.get(boardId);
+  res.json(presence ? [...presence.values()] : []);
 });
 
 // --- Activity ---

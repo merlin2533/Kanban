@@ -988,6 +988,102 @@ main#board {
   background: #fff;
 }
 
+/* --- Priority --- */
+.priority-select {
+  display: flex;
+  gap: 6px;
+}
+
+.priority-btn {
+  padding: 6px 12px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s;
+}
+
+.priority-btn.active {
+  border-color: currentColor;
+  font-weight: 600;
+}
+
+.priority-none { color: #64748b; }
+.priority-low { color: #22c55e; }
+.priority-medium { color: #f59e0b; }
+.priority-high { color: #dc2626; }
+
+.priority-btn:hover { opacity: 0.8; }
+
+/* --- Assignees --- */
+.assignee-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.assignee-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  background: #f1f5f9;
+  border-radius: 20px;
+  font-size: 12px;
+}
+
+.assignee-initial {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.card-assignees {
+  display: flex;
+  gap: 2px;
+}
+
+.assignee-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  border: 2px solid #fff;
+}
+
+/* --- Presence --- */
+.presence-indicator {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.presence-dot {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  border: 2px solid #22c55e;
+  cursor: default;
+}
+
 /* --- Responsive --- */
 @media (max-width: 640px) {
   .column {
@@ -1051,4 +1147,7 @@ main#board {
   .wip-badge { background: #334155; color: #94a3b8; }
   .wip-badge.wip-exceeded { background: #450a0a; color: #fca5a5; }
   .add-column-input { background: #334155; color: #e2e8f0; border-color: #2563eb; }
+  .priority-btn { background: #334155; border-color: #475569; }
+  .assignee-tag { background: #334155; }
+  .assignee-dot { border-color: #334155; }
 }

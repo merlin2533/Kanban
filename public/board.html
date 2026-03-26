@@ -48,6 +48,26 @@
           <input type="date" id="modalDueDate" class="modal-due-date" aria-label="Fälligkeitsdatum">
         </section>
 
+        <!-- Priority -->
+        <section class="modal-section">
+          <h3>Priorität</h3>
+          <div class="priority-select" id="prioritySelect">
+            <button data-priority="" class="priority-btn priority-none active">Keine</button>
+            <button data-priority="low" class="priority-btn priority-low">Niedrig</button>
+            <button data-priority="medium" class="priority-btn priority-medium">Mittel</button>
+            <button data-priority="high" class="priority-btn priority-high">Hoch</button>
+          </div>
+        </section>
+
+        <!-- Assignees -->
+        <section class="modal-section">
+          <h3>Zugewiesen</h3>
+          <div id="cardAssignees" class="assignee-list"></div>
+          <select id="assignUserSelect" class="board-sort" aria-label="Benutzer zuweisen" style="margin-top:8px;">
+            <option value="">+ Benutzer zuweisen...</option>
+          </select>
+        </section>
+
         <!-- Labels -->
         <section class="modal-section">
           <h3>Labels</h3>
