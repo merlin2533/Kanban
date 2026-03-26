@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kanban-v1';
+const CACHE_NAME = 'kanban-v2';
 const STATIC_ASSETS = [
   '/',
   '/board.html',
@@ -47,26 +47,26 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
-  // Navigation requests: fallback to board.html for /board/* routes
+  // Navigation requests: network first, fallback to cached page for matching route
   if (e.request.mode === 'navigate') {
     e.respondWith(
-      fetch(e.request).catch(() => caches.match('/board.html'))
+      fetch(e.request).catch(() => {
+        if (url.pathname.startsWith('/board/')) return caches.match('/board.html');
+        return caches.match(url.pathname) || caches.match('/');
+      })
     );
     return;
   }
 
-  // Static assets: cache first, fallback to network
+  // Static assets: network first, fallback to cache (avoids stale JS/HTML)
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      return cached || fetch(e.request).then(response => {
-        // Cache new static responses
-        if (response.ok) {
-          const clone = response.clone();
-          caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
-        }
-        return response;
-      });
-    })
+    fetch(e.request).then(response => {
+      if (response.ok) {
+        const clone = response.clone();
+        caches.open(CACHE_NAME).then(cache => cache.put(e.request, clone));
+      }
+      return response;
+    }).catch(() => caches.match(e.request))
   );
 });
 

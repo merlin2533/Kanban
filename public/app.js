@@ -118,9 +118,20 @@ document.addEventListener('DOMContentLoaded', async () => {
       }, 500);
     }
   };
+  let sseErrorCount = 0;
   eventSource.onerror = () => {
-    // Reconnect is automatic with EventSource
+    sseErrorCount++;
+    // After multiple consecutive failures, check if session is still valid
+    if (sseErrorCount >= 3) {
+      fetch('/api/auth/status').then(r => r.json()).then(data => {
+        if (!data.authenticated) {
+          eventSource.close();
+          window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+        }
+      }).catch(() => {});
+    }
   };
+  eventSource.onopen = () => { sseErrorCount = 0; };
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js');
@@ -412,6 +423,10 @@ async function api(url, method = 'GET', body = null) {
   }
   const res = await fetch(url, opts);
   if (!res.ok) {
+    if (res.status === 401) {
+      window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+      return new Promise(() => {}); // never resolves, page is navigating away
+    }
     const err = await res.json().catch(() => ({ error: 'Request failed' }));
     throw new Error(err.error || 'Request failed');
   }
