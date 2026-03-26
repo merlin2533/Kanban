@@ -2,6 +2,8 @@ const CACHE_NAME = 'kanban-v1';
 const STATIC_ASSETS = [
   '/',
   '/board.html',
+  '/login.html',
+  '/settings.html',
   '/style.css',
   '/app.js',
   '/manifest.json',

@@ -112,8 +112,8 @@
       e.preventDefault();
       const result = document.getElementById('pwResult');
       const newPw = document.getElementById('newPassword').value;
-      const confirm = document.getElementById('confirmPassword').value;
-      if (newPw !== confirm) { result.textContent = 'Passwörter stimmen nicht überein.'; result.style.color = '#dc2626'; return; }
+      const confirmPw = document.getElementById('confirmPassword').value;
+      if (newPw !== confirmPw) { result.textContent = 'Passwörter stimmen nicht überein.'; result.style.color = '#dc2626'; return; }
 
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',

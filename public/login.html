@@ -90,7 +90,8 @@
     // Check if already logged in
     fetch('/api/auth/me').then(r => {
       if (r.ok) {
-        const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        let redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        if (!redirect.startsWith('/') || redirect.startsWith('//')) redirect = '/';
         window.location.href = redirect;
       }
     });
@@ -124,7 +125,8 @@
           }
         }
 
-        const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        let redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        if (!redirect.startsWith('/') || redirect.startsWith('//')) redirect = '/';
         window.location.href = redirect;
       } catch (err) {
         errorEl.textContent = 'Verbindungsfehler';

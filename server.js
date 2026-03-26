@@ -93,13 +93,7 @@ function authMiddleware(req, res, next) {
     if (link) {
       req.accessLink = link;
       req.permission = link.permission;
-      // For state-changing requests, require a custom header (simple CSRF protection)
-      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
-        // Access token requests are exempt (they're URL-based, not cookie-based)
-        if (!req.query.token && !req.headers['x-requested-with']) {
-          return res.status(403).json({ error: 'Missing X-Requested-With header' });
-        }
-      }
+      // Access token auth is URL-based (not cookie-based), so CSRF is N/A
       return next();
     }
   }
