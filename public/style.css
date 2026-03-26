@@ -945,6 +945,49 @@ main#board {
 
 .import-label:hover { background: #e2e8f0; }
 
+/* --- WIP Badge --- */
+.wip-badge {
+  font-size: 10px;
+  color: #64748b;
+  background: #f1f5f9;
+  padding: 1px 6px;
+  border-radius: 4px;
+}
+
+.wip-badge.wip-exceeded {
+  background: #fef2f2;
+  color: #dc2626;
+  font-weight: 600;
+}
+
+/* --- Move Button --- */
+.btn-move {
+  padding: 6px 16px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+}
+.btn-move:hover { background: #1d4ed8; }
+
+/* --- Add Column Area --- */
+.add-column-area {
+  min-width: 280px;
+}
+
+.add-column-input {
+  width: 100%;
+  padding: 12px 16px;
+  border: 2px solid #2563eb;
+  border-radius: 12px;
+  font-size: 14px;
+  outline: none;
+  background: #fff;
+}
+
 /* --- Responsive --- */
 @media (max-width: 640px) {
   .column {
@@ -1005,4 +1048,7 @@ main#board {
   .board-list-item:hover { background: #1e3a5f; border-color: #2563eb; }
   .import-label { background: #334155; border-color: #475569; color: #e2e8f0; }
   .archived-item { border-color: #334155; }
+  .wip-badge { background: #334155; color: #94a3b8; }
+  .wip-badge.wip-exceeded { background: #450a0a; color: #fca5a5; }
+  .add-column-input { background: #334155; color: #e2e8f0; border-color: #2563eb; }
 }

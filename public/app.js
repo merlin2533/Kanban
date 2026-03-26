@@ -896,6 +896,17 @@ function setupModal() {
       uploadFilesFromList(e.dataTransfer.files);
     }
   };
+
+  document.getElementById('moveCardBtn').onclick = async () => {
+    if (!currentCardId) return;
+    const select = document.getElementById('moveColumnSelect');
+    const targetCol = Number(select.value);
+    try {
+      await api(`/api/cards/${currentCardId}/move`, 'PUT', { columnId: targetCol, position: 0 });
+      closeModal();
+      loadBoard();
+    } catch (e) { showError(e.message); }
+  };
 }
 
 function openCardModal(card) {
@@ -911,6 +922,17 @@ function openCardModal(card) {
   renderAttachments(card.attachments || []);
   renderCardLabels(card.labels || []);
   renderComments(card.comments || []);
+  const moveSelect = document.getElementById('moveColumnSelect');
+  if (moveSelect && board) {
+    moveSelect.innerHTML = '';
+    for (const col of board.columns) {
+      const opt = document.createElement('option');
+      opt.value = col.id;
+      opt.textContent = col.title;
+      if (col.id === card.column_id) opt.selected = true;
+      moveSelect.appendChild(opt);
+    }
+  }
   const archiveBtn = document.getElementById('archiveCardBtn');
   if (archiveBtn) archiveBtn.style.display = card.archived ? 'none' : '';
   const restoreBtn = document.getElementById('restoreCardBtn');
