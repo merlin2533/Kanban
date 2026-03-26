@@ -108,7 +108,7 @@
           del.textContent = 'Löschen';
           del.onclick = async () => {
             if (!confirm('Benutzer ' + user.username + ' löschen?')) return;
-            await fetch('/api/admin/users/' + user.id, { method: 'DELETE' });
+            await fetch('/api/admin/users/' + user.id, { method: 'DELETE', headers: { 'X-Requested-With': 'kanban' } });
             loadUsers();
           };
           div.appendChild(del);
@@ -170,7 +170,7 @@
             if (!sel.value) return;
             await fetch('/api/boards/' + board.id + '/members', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
               body: JSON.stringify({ user_id: parseInt(sel.value) })
             });
             sel.value = '';
@@ -200,7 +200,7 @@
         tag.className = 'member-tag';
         tag.innerHTML = member.username + ' <button class="member-remove" data-uid="' + member.id + '" title="Entfernen">&times;</button>';
         tag.querySelector('.member-remove').onclick = async () => {
-          await fetch('/api/boards/' + boardId + '/members/' + member.id, { method: 'DELETE' });
+          await fetch('/api/boards/' + boardId + '/members/' + member.id, { method: 'DELETE', headers: { 'X-Requested-With': 'kanban' } });
           renderMembers(boardId, container, allNonAdmins);
         };
         container.appendChild(tag);
@@ -216,7 +216,7 @@
 
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
         body: JSON.stringify({ currentPassword: document.getElementById('currentPassword').value, newPassword: newPw })
       });
       const data = await res.json();
@@ -234,7 +234,7 @@
       e.preventDefault();
       const res = await fetch('/api/admin/users', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
         body: JSON.stringify({
           username: document.getElementById('newUsername').value,
           password: document.getElementById('newUserPassword').value,
