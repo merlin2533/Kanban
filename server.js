@@ -91,6 +91,13 @@ function authMiddleware(req, res, next) {
     if (link) {
       req.accessLink = link;
       req.permission = link.permission;
+      // For state-changing requests, require a custom header (simple CSRF protection)
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+        // Access token requests are exempt (they're URL-based, not cookie-based)
+        if (!req.query.token && !req.headers['x-requested-with']) {
+          return res.status(403).json({ error: 'Missing X-Requested-With header' });
+        }
+      }
       return next();
     }
   }
@@ -101,6 +108,12 @@ function authMiddleware(req, res, next) {
     if (session) {
       req.user = { id: session.user_id, username: session.username, is_admin: session.is_admin, password_changed_at: session.password_changed_at };
       req.permission = 'admin';
+      // For state-changing requests, require a custom header (simple CSRF protection)
+      if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+        if (!req.query.token && !req.headers['x-requested-with']) {
+          return res.status(403).json({ error: 'Missing X-Requested-With header' });
+        }
+      }
       return next();
     }
   }
@@ -119,14 +132,53 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+function requireBoardAccess(req, boardId) {
+  // Admin users can access all boards
+  if (req.user) return true;
+  // Access link users can only access their linked board
+  if (req.accessLink && req.accessLink.board_id === boardId) return true;
+  return false;
+}
+
+// --- Login rate limiting ---
+const loginAttempts = new Map();
+function loginRateLimit(req, res, next) {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  const attempts = loginAttempts.get(ip) || [];
+  // Clean old attempts (older than 60s)
+  const recent = attempts.filter(t => now - t < 60000);
+  if (recent.length >= 5) {
+    return res.status(429).json({ error: 'Too many login attempts. Try again in 1 minute.' });
+  }
+  loginAttempts.set(ip, recent);
+  next();
+}
+// Clean rate limit map periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, attempts] of loginAttempts) {
+    const recent = attempts.filter(t => now - t < 60000);
+    if (recent.length === 0) loginAttempts.delete(ip);
+    else loginAttempts.set(ip, recent);
+  }
+}, 60000);
+
 // --- Auth Routes ---
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginRateLimit, (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
+  const ip = req.ip || req.connection.remoteAddress;
   const user = db.authenticateUser(username, password);
-  if (!user) return res.status(401).json({ error: 'Invalid credentials' });
+  if (!user) {
+    const attempts = loginAttempts.get(ip) || [];
+    attempts.push(Date.now());
+    loginAttempts.set(ip, attempts);
+    return res.status(401).json({ error: 'Invalid credentials' });
+  }
   const session = db.createSession(user.id);
-  res.setHeader('Set-Cookie', `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}`);
+  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}${secure}`);
   const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
   res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 });
 });
@@ -188,7 +240,9 @@ app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
 
 // --- Board Access Links ---
 app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
-  res.json(db.getBoardAccessLinks(req.params.boardId));
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
+  res.json(db.getBoardAccessLinks(boardId));
 });
 
 app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
@@ -209,6 +263,7 @@ const sseClients = new Map(); // boardId -> Set of response objects
 
 app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
 
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -277,6 +332,7 @@ app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
 app.get('/api/boards/:boardId', authMiddleware, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
   const board = db.getBoard(id);
   if (!board) return res.status(404).json({ error: 'Board not found' });
   res.json(board);
@@ -285,6 +341,7 @@ app.get('/api/boards/:boardId', authMiddleware, (req, res) => {
 app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
   const title = validString(req.body.title, 200);
   if (title === null) return res.status(400).json({ error: 'title must be a non-empty string max 200 chars' });
   const board = db.updateBoard(id, title);
@@ -296,8 +353,13 @@ app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
 app.delete('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
+  const filePaths = db.getBoardAttachmentPaths(id);
   const board = db.deleteBoard(id);
   if (!board) return res.status(404).json({ error: 'Board not found' });
+  for (const fp of filePaths) {
+    try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
+  }
   broadcast(id, { type: 'update', action: 'board_deleted' });
   res.json({ ok: true });
 });
@@ -305,6 +367,7 @@ app.delete('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
 // --- Export / Import ---
 app.get('/api/boards/:boardId/export', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
   const data = db.exportBoard(boardId);
   if (!data) return res.status(404).json({ error: 'Board not found' });
   const safeTitle = (data.title || 'board').replace(/[^\w\s-]/g, '_').slice(0, 100);
@@ -321,6 +384,7 @@ app.post('/api/boards/import', authMiddleware, requireEdit, (req, res) => {
 // --- Archived cards ---
 app.get('/api/boards/:boardId/archived', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
   res.json(db.getArchivedCards(boardId));
 });
 
@@ -434,8 +498,12 @@ app.delete('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   // Fetch boardId before deletion since the card will be gone after
   const boardId = db.getCardBoardId(id);
+  const filePaths = db.getCardAttachmentPaths(id);
   const card = db.deleteCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  for (const fp of filePaths) {
+    try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
+  }
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_deleted' });
   res.json({ ok: true });
 });
@@ -545,6 +613,7 @@ app.delete('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) =
 // --- Labels ---
 app.get('/api/boards/:boardId/labels', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
   res.json(db.getLabels(boardId));
 });
 
@@ -636,6 +705,7 @@ app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
 app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
   const rawLimit = Number(req.query.limit) || 50;
   const limit = Math.min(rawLimit, 200);
   res.json(db.getActivity(id, limit));
@@ -653,6 +723,9 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
 });
+
+// Clean expired sessions hourly
+setInterval(() => { try { db.cleanExpiredSessions(); } catch {} }, 60 * 60 * 1000);
 
 // Graceful shutdown
 process.on('SIGTERM', () => { server.close(); });

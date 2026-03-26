@@ -95,7 +95,14 @@ document.addEventListener('DOMContentLoaded', async () => {
     const event = JSON.parse(e.data);
     if (event.type === 'update') {
       clearTimeout(sseDebounceTimer);
-      sseDebounceTimer = setTimeout(() => loadBoard(), 500);
+      sseDebounceTimer = setTimeout(() => {
+        // Don't reload while modal is open - queue it
+        if (currentCardId) {
+          window._pendingBoardReload = true;
+        } else {
+          loadBoard();
+        }
+      }, 500);
     }
   };
   eventSource.onerror = () => {
@@ -238,6 +245,23 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      // Always allow Escape to close modal/panels, even in inputs
+      const modal = document.getElementById('modalOverlay');
+      if (modal && !modal.classList.contains('hidden')) {
+        closeModal();
+        e.preventDefault();
+        return;
+      }
+      const actPanel = document.getElementById('activityPanel');
+      if (actPanel && !actPanel.classList.contains('hidden')) { actPanel.classList.add('hidden'); e.preventDefault(); return; }
+      const archPanel = document.getElementById('archivePanel');
+      if (archPanel && !archPanel.classList.contains('hidden')) { archPanel.classList.add('hidden'); e.preventDefault(); return; }
+      const permPanel = document.getElementById('permissionsPanel');
+      if (permPanel && !permPanel.classList.contains('hidden')) { permPanel.classList.add('hidden'); e.preventDefault(); return; }
+      return;
+    }
+
     // Don't trigger when typing in inputs
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
 
@@ -250,13 +274,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       // Focus search
       const search = document.getElementById('boardSearch');
       if (search) { search.focus(); e.preventDefault(); }
-    }
-    if (e.key === 'Escape') {
-      closeModal();
-      const actPanel = document.getElementById('activityPanel');
-      if (actPanel && !actPanel.classList.contains('hidden')) actPanel.classList.add('hidden');
-      const archPanel = document.getElementById('archivePanel');
-      if (archPanel && !archPanel.classList.contains('hidden')) archPanel.classList.add('hidden');
     }
     if (e.key === '?' && !e.ctrlKey) {
       // Show shortcuts help
@@ -277,6 +294,7 @@ async function api(url, method = 'GET', body = null) {
     url = url + separator + 'token=' + window._accessToken;
   }
   const opts = { method, headers: {} };
+  opts.headers['X-Requested-With'] = 'kanban';
   if (body && !(body instanceof FormData)) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -298,6 +316,20 @@ function showError(msg) {
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
+}
+
+// --- Loading helper ---
+async function withLoading(btn, fn) {
+  if (btn.disabled) return;
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '...';
+  try {
+    await fn();
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
 }
 
 // --- Board ---
@@ -802,7 +834,7 @@ function setupModal() {
   }
 
   // Archive card
-  document.getElementById('archiveCardBtn').onclick = async () => {
+  document.getElementById('archiveCardBtn').onclick = () => withLoading(document.getElementById('archiveCardBtn'), async () => {
     if (!currentCardId) return;
     try {
       const cardData = findCard(currentCardId);
@@ -818,25 +850,24 @@ function setupModal() {
       closeModal();
       loadBoard();
     } catch (e) { showError(e.message); }
-  };
+  });
 
   // Restore card
   const restoreBtn = document.getElementById('restoreCardBtn');
   if (restoreBtn) {
-    restoreBtn.onclick = async () => {
+    restoreBtn.onclick = () => withLoading(restoreBtn, async () => {
       if (!currentCardId) return;
       try {
         await api(`/api/cards/${currentCardId}/restore`, 'PUT');
         closeModal();
         loadBoard();
       } catch (e) { showError(e.message); }
-    };
+    });
   }
 
   // Delete card
-  document.getElementById('deleteCardBtn').onclick = async () => {
-    if (!currentCardId) return;
-    if (!confirm('Karte löschen?')) return;
+  document.getElementById('deleteCardBtn').onclick = () => withLoading(document.getElementById('deleteCardBtn'), async () => {
+    if (!currentCardId || !confirm('Karte löschen?')) return;
     const cardData = findCard(currentCardId);
     try {
       await api(`/api/cards/${currentCardId}`, 'DELETE');
@@ -853,7 +884,7 @@ function setupModal() {
     } catch (e) {
       showError(e.message);
     }
-  };
+  });
 
   // Comments
   document.getElementById('addCommentBtn').onclick = addComment;
@@ -897,7 +928,7 @@ function setupModal() {
     }
   };
 
-  document.getElementById('moveCardBtn').onclick = async () => {
+  document.getElementById('moveCardBtn').onclick = () => withLoading(document.getElementById('moveCardBtn'), async () => {
     if (!currentCardId) return;
     const select = document.getElementById('moveColumnSelect');
     const targetCol = Number(select.value);
@@ -906,7 +937,7 @@ function setupModal() {
       closeModal();
       loadBoard();
     } catch (e) { showError(e.message); }
-  };
+  });
 }
 
 function openCardModal(card) {
@@ -949,6 +980,10 @@ function closeModal() {
   if (dd) dd.classList.add('hidden');
   const commentInput = document.getElementById('commentInput');
   if (commentInput) commentInput.value = '';
+  if (window._pendingBoardReload) {
+    window._pendingBoardReload = false;
+    loadBoard();
+  }
 }
 
 // --- Labels ---
@@ -1338,6 +1373,13 @@ function formatAction(action, details) {
     card_updated: () => `Karte bearbeitet: <strong>${esc(details.text)}</strong>`,
     card_deleted: () => `Karte <strong>${esc(details.text)}</strong> gelöscht`,
     card_moved: () => `Karte <strong>${esc(details.text)}</strong> von ${esc(details.from)} nach ${esc(details.to)} verschoben`,
+    card_archived: () => `Karte <strong>${esc(details.text)}</strong> archiviert`,
+    card_restored: () => `Karte <strong>${esc(details.text)}</strong> wiederhergestellt`,
+    comment_added: () => `Kommentar zu <strong>${esc(details.cardText)}</strong>: "${esc((details.commentText || '').slice(0, 50))}"`,
+    board_updated: () => `Board umbenannt zu <strong>${esc(details.title)}</strong>`,
+    board_imported: () => `Board <strong>${esc(details.title)}</strong> importiert`,
+    column_moved: () => `Spalte verschoben`,
+    access_link_created: () => `Zugriffs-Link erstellt (${esc(details.permission)})`,
     file_uploaded: () => `Datei <strong>${esc(details.filename)}</strong> hochgeladen`,
     checklist_item_added: () => `Checklist-Item zu <strong>${esc(details.cardText)}</strong> hinzugefügt`,
     checklist_item_updated: () => `Checklist-Item in <strong>${esc(details.cardText)}</strong> aktualisiert`,
@@ -1523,15 +1565,16 @@ async function togglePermissionsPanel() {
         item.innerHTML = `
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
-              <strong>${link.label || 'Link'}</strong>
+              <strong>${esc(link.label) || 'Link'}</strong>
               <span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${link.permission === 'edit' ? '#dbeafe' : '#f1f5f9'};color:${link.permission === 'edit' ? '#2563eb' : '#64748b'};margin-left:4px;">${link.permission === 'edit' ? 'Bearbeiten' : 'Nur lesen'}</span>
             </div>
             <div style="display:flex;gap:4px;">
-              <button class="icon-btn" title="Link kopieren" style="font-size:14px;padding:4px 8px;" onclick="navigator.clipboard.writeText('${url}')">&#128279;</button>
-              <button class="icon-btn" title="Löschen" style="font-size:14px;padding:4px 8px;color:#dc2626;" data-link-id="${link.id}">&#128465;</button>
+              <button class="icon-btn" title="Link kopieren" style="font-size:14px;padding:4px 8px;" data-copy-url>&#128279;</button>
+              <button class="icon-btn" title="Löschen" style="font-size:14px;padding:4px 8px;color:#dc2626;" data-link-id="${esc(link.id)}">&#128465;</button>
             </div>
           </div>
         `;
+        item.querySelector('[data-copy-url]').addEventListener('click', () => navigator.clipboard.writeText(url));
 
         item.querySelector('[data-link-id]').onclick = async () => {
           try {

@@ -231,12 +231,7 @@ function deleteBoardAccessLink(id) {
 }
 
 function getUserBoards(userId) {
-  // Admin sees all boards
-  const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
-  if (user && user.is_admin) {
-    return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
-  }
-  return [];
+  return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
 }
 
 function getUsers() {
@@ -617,6 +612,19 @@ function getAttachment(id) {
   return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
 }
 
+function getCardAttachmentPaths(cardId) {
+  return db.prepare('SELECT filepath FROM attachments WHERE card_id = ?').all(cardId).map(a => a.filepath);
+}
+
+function getBoardAttachmentPaths(boardId) {
+  return db.prepare(`
+    SELECT a.filepath FROM attachments a
+    JOIN cards c ON a.card_id = c.id
+    JOIN columns col ON c.column_id = col.id
+    WHERE col.board_id = ?
+  `).all(boardId).map(a => a.filepath);
+}
+
 function deleteAttachment(id) {
   const att = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
   if (att) db.prepare('DELETE FROM attachments WHERE id = ?').run(id);
@@ -800,7 +808,7 @@ module.exports = {
   // Checklist
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   // Attachments
-  createAttachment, getAttachment, deleteAttachment,
+  createAttachment, getAttachment, deleteAttachment, getCardAttachmentPaths, getBoardAttachmentPaths,
   // Labels
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
   // Activity
