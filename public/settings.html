@@ -100,7 +100,10 @@
       for (const user of users) {
         const div = document.createElement('div');
         div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0;';
-        div.innerHTML = '<span>' + user.username + (user.is_admin ? ' <strong>(Admin)</strong>' : '') + '</span>';
+        const nameSpan = document.createElement('span');
+        nameSpan.textContent = user.username + (user.is_admin ? ' (Admin)' : '');
+        if (user.is_admin) nameSpan.style.fontWeight = 'bold';
+        div.appendChild(nameSpan);
         if (user.id !== currentUser.id) {
           const del = document.createElement('button');
           del.className = 'danger-btn';
@@ -141,7 +144,9 @@
 
         const header = document.createElement('div');
         header.className = 'board-access-header';
-        header.innerHTML = '<strong>' + board.title + '</strong>';
+        const titleStrong = document.createElement('strong');
+        titleStrong.textContent = board.title;
+        header.appendChild(titleStrong);
         boardDiv.appendChild(header);
 
         const membersDiv = document.createElement('div');
@@ -246,7 +251,7 @@
     });
 
     document.getElementById('logoutBtn').onclick = async () => {
-      await fetch('/api/auth/logout', { method: 'POST' });
+      await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'kanban' } });
       window.location.href = '/login.html';
     };
 

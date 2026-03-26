@@ -121,27 +121,29 @@
           // Show settings link and logout
           const nav = document.createElement('div');
           nav.style.cssText = 'position:fixed;top:12px;right:12px;display:flex;gap:8px;';
-          nav.innerHTML = '<a href="/settings.html" style="padding:6px 12px;background:#f1f5f9;border-radius:6px;text-decoration:none;color:#475569;font-size:13px;">&#9881; ' + currentUser.username + '</a>';
+          const settingsLink = document.createElement('a');
+          settingsLink.href = '/settings.html';
+          settingsLink.style.cssText = 'padding:6px 12px;background:#f1f5f9;border-radius:6px;text-decoration:none;color:#475569;font-size:13px;';
+          settingsLink.textContent = '\u2699 ' + currentUser.username;
+          nav.appendChild(settingsLink);
           const logoutBtn = document.createElement('button');
           logoutBtn.textContent = 'Abmelden';
           logoutBtn.style.cssText = 'padding:6px 12px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-size:13px;';
-          logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload(); };
+          logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'kanban' } }); window.location.reload(); };
           nav.appendChild(logoutBtn);
           document.body.appendChild(nav);
-
-          if (data.passwordReminder) {
-            if (confirm('Dein Passwort ist älter als 14 Tage. Jetzt ändern?')) {
-              window.location.href = '/settings.html';
-            }
-          }
+          return true;
         } else {
           window.location.href = '/login.html';
+          return false;
         }
       } catch {
         window.location.href = '/login.html';
+        return false;
       }
     }
-    checkAuth().then(() => {
+    checkAuth().then(authed => {
+      if (!authed) return;
       loadBoards();
       loadTemplates();
     });
