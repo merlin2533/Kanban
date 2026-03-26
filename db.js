@@ -72,6 +72,13 @@ db.exec(`
     PRIMARY KEY (card_id, label_id)
   );
 
+  CREATE TABLE IF NOT EXISTS comments (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
   CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
   CREATE INDEX IF NOT EXISTS idx_cards_column_id ON cards(column_id);
   CREATE INDEX IF NOT EXISTS idx_checklist_card_id ON checklist_items(card_id);
@@ -80,6 +87,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_labels_board_id ON labels(board_id);
   CREATE INDEX IF NOT EXISTS idx_card_labels_card_id ON card_labels(card_id);
   CREATE INDEX IF NOT EXISTS idx_card_labels_label_id ON card_labels(label_id);
+  CREATE INDEX IF NOT EXISTS idx_comments_card_id ON comments(card_id);
 `);
 
 // Migration: add description column if missing
@@ -87,6 +95,20 @@ try {
   db.prepare("SELECT description FROM cards LIMIT 1").get();
 } catch {
   db.exec("ALTER TABLE cards ADD COLUMN description TEXT DEFAULT ''");
+}
+
+// Migration: add due_date column if missing
+try {
+  db.prepare("SELECT due_date FROM cards LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE cards ADD COLUMN due_date TEXT DEFAULT NULL");
+}
+
+// Migration: add archived column if missing
+try {
+  db.prepare("SELECT archived FROM cards LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE cards ADD COLUMN archived INTEGER DEFAULT 0");
 }
 
 // --- Helpers ---
@@ -128,7 +150,7 @@ function getBoard(id) {
   const placeholders = columnIds.map(() => '?').join(',');
 
   const allCards = db.prepare(
-    `SELECT * FROM cards WHERE column_id IN (${placeholders}) ORDER BY position`
+    `SELECT * FROM cards WHERE column_id IN (${placeholders}) AND archived = 0 ORDER BY position`
   ).all(...columnIds);
 
   const cardIds = allCards.map(c => c.id);
@@ -136,6 +158,7 @@ function getBoard(id) {
   let allChecklist = [];
   let allAttachments = [];
   let allCardLabels = [];
+  let allComments = [];
 
   if (cardIds.length > 0) {
     const cardPlaceholders = cardIds.map(() => '?').join(',');
@@ -147,6 +170,9 @@ function getBoard(id) {
     ).all(...cardIds);
     allCardLabels = db.prepare(
       `SELECT cl.card_id, l.* FROM card_labels cl JOIN labels l ON cl.label_id = l.id WHERE cl.card_id IN (${cardPlaceholders})`
+    ).all(...cardIds);
+    allComments = db.prepare(
+      `SELECT * FROM comments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at ASC`
     ).all(...cardIds);
   }
 
@@ -169,11 +195,18 @@ function getBoard(id) {
     labelsByCard.get(cl.card_id).push({ id: cl.id, name: cl.name, color: cl.color, board_id: cl.board_id });
   }
 
+  const commentsByCard = new Map();
+  for (const c of allComments) {
+    if (!commentsByCard.has(c.card_id)) commentsByCard.set(c.card_id, []);
+    commentsByCard.get(c.card_id).push(c);
+  }
+
   const cardsByColumn = new Map();
   for (const card of allCards) {
     card.checklist = checklistByCard.get(card.id) || [];
     card.attachments = attachmentsByCard.get(card.id) || [];
     card.labels = labelsByCard.get(card.id) || [];
+    card.comments = commentsByCard.get(card.id) || [];
     if (!cardsByColumn.has(card.column_id)) cardsByColumn.set(card.column_id, []);
     cardsByColumn.get(card.column_id).push(card);
   }
@@ -273,6 +306,7 @@ function createCard(columnId, text) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(result.lastInsertRowid);
   card.checklist = [];
   card.attachments = [];
+  card.comments = [];
   return card;
 }
 
@@ -282,8 +316,9 @@ function updateCard(id, updates) {
 
   const text = updates.text !== undefined ? updates.text : card.text;
   const description = updates.description !== undefined ? updates.description : card.description;
+  const due_date = updates.due_date !== undefined ? updates.due_date : card.due_date;
 
-  db.prepare("UPDATE cards SET text = ?, description = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, id);
+  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, id);
 
   const updated = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(updated.column_id);
@@ -476,12 +511,122 @@ function getCardLabels(cardId) {
   return db.prepare('SELECT l.* FROM labels l JOIN card_labels cl ON l.id = cl.id WHERE cl.card_id = ? ORDER BY l.name').all(cardId);
 }
 
+// --- Archive ---
+
+function archiveCard(id) {
+  const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+  if (!card) return null;
+  db.prepare("UPDATE cards SET archived = 1, updated_at = datetime('now') WHERE id = ?").run(id);
+  const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
+  if (col) logActivity(col.board_id, 'card_archived', { text: card.text });
+  return db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+}
+
+function restoreCard(id) {
+  const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+  if (!card) return null;
+  db.prepare("UPDATE cards SET archived = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+  const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
+  if (col) logActivity(col.board_id, 'card_restored', { text: card.text });
+  return db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+}
+
+function getArchivedCards(boardId) {
+  return db.prepare(`
+    SELECT cards.* FROM cards
+    JOIN columns ON cards.column_id = columns.id
+    WHERE columns.board_id = ? AND cards.archived = 1
+    ORDER BY cards.updated_at DESC
+  `).all(boardId);
+}
+
+// --- Comments ---
+
+function getComments(cardId) {
+  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at ASC').all(cardId);
+}
+
+function createComment(cardId, text) {
+  const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
+  if (!card) return null;
+  const result = db.prepare('INSERT INTO comments (card_id, text) VALUES (?, ?)').run(cardId, text);
+  const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
+  if (col) logActivity(col.board_id, 'comment_added', { cardText: card.text, commentText: text.slice(0, 50) });
+  return db.prepare('SELECT * FROM comments WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function deleteComment(id) {
+  const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(id);
+  if (comment) db.prepare('DELETE FROM comments WHERE id = ?').run(id);
+  return comment;
+}
+
 // --- Activity ---
 
 // Fix #11: cap limit to max 500
 function getActivity(boardId, limit = 50) {
   limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
   return db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ?').all(boardId, limit);
+}
+
+// --- Export/Import ---
+
+function exportBoard(id) {
+  const board = getBoard(id);
+  if (!board) return null;
+  board.labels = db.prepare('SELECT * FROM labels WHERE board_id = ? ORDER BY name').all(id);
+  const archivedCards = getArchivedCards(id);
+  board.archivedCards = archivedCards;
+  return board;
+}
+
+function importBoard(data) {
+  const id = nanoid();
+  const imp = db.transaction(() => {
+    db.prepare('INSERT INTO boards (id, title) VALUES (?, ?)').run(id, data.title || 'Imported Board');
+
+    // Import labels
+    const labelMap = new Map();
+    for (const label of (data.labels || [])) {
+      const result = db.prepare('INSERT INTO labels (board_id, name, color) VALUES (?, ?, ?)').run(id, label.name, label.color || '#2563eb');
+      labelMap.set(label.id, result.lastInsertRowid);
+    }
+
+    // Import columns
+    for (const col of (data.columns || [])) {
+      const colResult = db.prepare('INSERT INTO columns (board_id, title, position) VALUES (?, ?, ?)').run(id, col.title, col.position);
+      const newColId = colResult.lastInsertRowid;
+
+      for (const card of (col.cards || [])) {
+        const cardResult = db.prepare('INSERT INTO cards (column_id, text, description, position, due_date) VALUES (?, ?, ?, ?, ?)').run(
+          newColId, card.text, card.description || '', card.position, card.due_date || null
+        );
+        const newCardId = cardResult.lastInsertRowid;
+
+        // Checklist items
+        for (const item of (card.checklist || [])) {
+          db.prepare('INSERT INTO checklist_items (card_id, text, checked, position) VALUES (?, ?, ?, ?)').run(newCardId, item.text, item.checked ? 1 : 0, item.position);
+        }
+
+        // Card labels
+        for (const label of (card.labels || [])) {
+          const newLabelId = labelMap.get(label.id);
+          if (newLabelId) {
+            db.prepare('INSERT OR IGNORE INTO card_labels (card_id, label_id) VALUES (?, ?)').run(newCardId, newLabelId);
+          }
+        }
+
+        // Comments
+        for (const comment of (card.comments || [])) {
+          db.prepare('INSERT INTO comments (card_id, text) VALUES (?, ?)').run(newCardId, comment.text);
+        }
+      }
+    }
+
+    logActivity(id, 'board_imported', { title: data.title });
+  });
+  imp();
+  return getBoard(id);
 }
 
 module.exports = {
@@ -491,5 +636,8 @@ module.exports = {
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   createAttachment, getAttachment, deleteAttachment,
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
-  getActivity
+  getActivity,
+  archiveCard, restoreCard, getArchivedCards,
+  getComments, createComment, deleteComment,
+  exportBoard, importBoard
 };

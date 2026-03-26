@@ -3,6 +3,33 @@ let boardId = window.location.pathname.split('/board/')[1];
 let board = null;
 let currentCardId = null;
 
+// --- Undo Stack ---
+const undoStack = [];
+const MAX_UNDO = 20;
+
+function pushUndo(action) {
+  undoStack.push(action);
+  if (undoStack.length > MAX_UNDO) undoStack.shift();
+  updateUndoBtn();
+}
+
+function updateUndoBtn() {
+  const btn = document.getElementById('undoBtn');
+  if (btn) btn.disabled = undoStack.length === 0;
+}
+
+async function performUndo() {
+  if (undoStack.length === 0) return;
+  const action = undoStack.pop();
+  try {
+    await action.undo();
+    loadBoard();
+  } catch (e) {
+    showError('Undo fehlgeschlagen: ' + e.message);
+  }
+  updateUndoBtn();
+}
+
 // --- boardId guard ---
 if (!boardId) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -15,6 +42,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadBoard();
   setupActivityPanel();
   setupModal();
+
+  // SSE real-time sync
+  const eventSource = new EventSource(`/api/boards/${boardId}/events`);
+  eventSource.onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    if (event.type === 'update') {
+      loadBoard(); // reload board on any change
+    }
+  };
+  eventSource.onerror = () => {
+    // Reconnect is automatic with EventSource
+  };
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js');
@@ -42,6 +81,72 @@ document.addEventListener('DOMContentLoaded', async () => {
   boardTitleEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); boardTitleEl.blur(); }
   });
+
+  // Search filter
+  const searchInput = document.createElement('input');
+  searchInput.type = 'search';
+  searchInput.placeholder = 'Karten suchen...';
+  searchInput.className = 'board-search';
+  searchInput.id = 'boardSearch';
+  searchInput.setAttribute('aria-label', 'Karten suchen');
+  document.querySelector('header').insertBefore(searchInput, document.querySelector('.header-actions'));
+
+  searchInput.oninput = () => {
+    const query = searchInput.value.toLowerCase().trim();
+    document.querySelectorAll('.card').forEach(card => {
+      const text = card.textContent.toLowerCase();
+      card.style.display = !query || text.includes(query) ? '' : 'none';
+    });
+  };
+
+  // Sort
+  const sortSelect = document.createElement('select');
+  sortSelect.className = 'board-sort';
+  sortSelect.id = 'boardSort';
+  sortSelect.setAttribute('aria-label', 'Sortierung');
+  sortSelect.innerHTML = '<option value="">Standard</option><option value="alpha">A-Z</option><option value="date">Neueste</option><option value="due">Fälligkeit</option>';
+  document.querySelector('header').insertBefore(sortSelect, document.querySelector('.header-actions'));
+
+  sortSelect.onchange = () => {
+    renderBoard();
+  };
+
+  // Export button
+  const exportBtn = document.createElement('button');
+  exportBtn.className = 'icon-btn';
+  exportBtn.innerHTML = '&#11015;'; // download arrow
+  exportBtn.title = 'Board exportieren';
+  exportBtn.onclick = async () => {
+    try {
+      const data = await api(`/api/boards/${boardId}/export`);
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (board.title || 'board') + '.json';
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { showError(e.message); }
+  };
+  document.querySelector('.header-actions').insertBefore(exportBtn, document.getElementById('activityBtn'));
+
+  // Archive view button
+  const archiveViewBtn = document.createElement('button');
+  archiveViewBtn.className = 'icon-btn';
+  archiveViewBtn.innerHTML = '&#128451;'; // archive icon
+  archiveViewBtn.title = 'Archiv';
+  archiveViewBtn.onclick = toggleArchivePanel;
+  document.querySelector('.header-actions').insertBefore(archiveViewBtn, document.getElementById('activityBtn'));
+
+  // Undo button
+  const undoBtn = document.createElement('button');
+  undoBtn.className = 'icon-btn';
+  undoBtn.id = 'undoBtn';
+  undoBtn.innerHTML = '&#8630;'; // undo arrow
+  undoBtn.title = 'Rückgängig (Ctrl+Z)';
+  undoBtn.disabled = true;
+  undoBtn.onclick = performUndo;
+  document.querySelector('.header-actions').insertBefore(undoBtn, document.getElementById('activityBtn'));
 
   // Share/copy link button
   const shareBtn = document.createElement('button');
@@ -72,6 +177,39 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
   document.querySelector('.header-actions').appendChild(deleteBoard);
+
+  // Keyboard shortcuts
+  document.addEventListener('keydown', (e) => {
+    // Don't trigger when typing in inputs
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.isContentEditable) return;
+
+    if (e.key === 'n' && !e.ctrlKey && !e.metaKey) {
+      // Focus first column's add card input
+      const firstInput = document.querySelector('.add-card input');
+      if (firstInput) { firstInput.focus(); e.preventDefault(); }
+    }
+    if (e.key === 'f' && !e.ctrlKey && !e.metaKey) {
+      // Focus search
+      const search = document.getElementById('boardSearch');
+      if (search) { search.focus(); e.preventDefault(); }
+    }
+    if (e.key === 'Escape') {
+      closeModal();
+      const actPanel = document.getElementById('activityPanel');
+      if (actPanel && !actPanel.classList.contains('hidden')) actPanel.classList.add('hidden');
+      const archPanel = document.getElementById('archivePanel');
+      if (archPanel && !archPanel.classList.contains('hidden')) archPanel.classList.add('hidden');
+    }
+    if (e.key === '?' && !e.ctrlKey) {
+      // Show shortcuts help
+      alert('Tastaturkürzel:\n\nn - Neue Karte\nf - Suche\nEsc - Schließen\n? - Diese Hilfe');
+      e.preventDefault();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+      e.preventDefault();
+      performUndo();
+    }
+  });
 });
 
 // --- API Helpers ---
@@ -225,6 +363,12 @@ function createColumnEl(col) {
     if (!confirm(`Spalte "${col.title}" mit allen Karten löschen?`)) return;
     try {
       await api(`/api/columns/${col.id}`, 'DELETE');
+      pushUndo({
+        description: `Spalte "${col.title}" gelöscht`,
+        undo: async () => {
+          await api(`/api/boards/${boardId}/columns`, 'POST', { title: col.title });
+        }
+      });
       loadBoard();
     } catch (e) {
       showError(e.message);
@@ -256,7 +400,22 @@ function createColumnEl(col) {
   cardsContainer.addEventListener('dragleave', handleDragLeave);
   cardsContainer.addEventListener('drop', handleDrop);
 
-  for (const card of col.cards) {
+  const sortBy = document.getElementById('boardSort')?.value;
+  let sortedCards = [...col.cards];
+  if (sortBy === 'alpha') {
+    sortedCards.sort((a, b) => a.text.localeCompare(b.text));
+  } else if (sortBy === 'date') {
+    sortedCards.sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  } else if (sortBy === 'due') {
+    sortedCards.sort((a, b) => {
+      if (!a.due_date && !b.due_date) return 0;
+      if (!a.due_date) return 1;
+      if (!b.due_date) return -1;
+      return a.due_date.localeCompare(b.due_date);
+    });
+  }
+
+  for (const card of sortedCards) {
     cardsContainer.appendChild(createCardEl(card));
   }
 
@@ -343,6 +502,18 @@ function createCardEl(card) {
     const span = document.createElement('span');
     span.textContent = `\uD83D\uDCCE ${card.attachments.length}`;
     meta.appendChild(span);
+    hasMeta = true;
+  }
+
+  if (card.due_date) {
+    const due = new Date(card.due_date);
+    const now = new Date();
+    const dueSpan = document.createElement('span');
+    const isOverdue = due < now;
+    const isSoon = !isOverdue && (due - now) < 86400000 * 2; // 2 days
+    dueSpan.style.cssText = isOverdue ? 'color:#dc2626;' : isSoon ? 'color:#f59e0b;' : '';
+    dueSpan.textContent = '\uD83D\uDCC5 ' + due.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
+    meta.appendChild(dueSpan);
     hasMeta = true;
   }
 
@@ -488,17 +659,75 @@ function setupModal() {
     };
   }
 
+  // Due date
+  const dueDateInput = document.getElementById('modalDueDate');
+  if (dueDateInput) {
+    dueDateInput.onchange = async () => {
+      if (!currentCardId) return;
+      try {
+        await api(`/api/cards/${currentCardId}`, 'PATCH', { due_date: dueDateInput.value || null });
+      } catch (e) { showError(e.message); }
+    };
+  }
+
+  // Archive card
+  document.getElementById('archiveCardBtn').onclick = async () => {
+    if (!currentCardId) return;
+    try {
+      const cardData = findCard(currentCardId);
+      await api(`/api/cards/${currentCardId}/archive`, 'PUT');
+      if (cardData) {
+        pushUndo({
+          description: `Karte "${cardData.text}" archiviert`,
+          undo: async () => {
+            await api(`/api/cards/${cardData.id}/restore`, 'PUT');
+          }
+        });
+      }
+      closeModal();
+      loadBoard();
+    } catch (e) { showError(e.message); }
+  };
+
+  // Restore card
+  const restoreBtn = document.getElementById('restoreCardBtn');
+  if (restoreBtn) {
+    restoreBtn.onclick = async () => {
+      if (!currentCardId) return;
+      try {
+        await api(`/api/cards/${currentCardId}/restore`, 'PUT');
+        closeModal();
+        loadBoard();
+      } catch (e) { showError(e.message); }
+    };
+  }
+
   // Delete card
   document.getElementById('deleteCardBtn').onclick = async () => {
     if (!currentCardId) return;
     if (!confirm('Karte löschen?')) return;
+    const cardData = findCard(currentCardId);
     try {
       await api(`/api/cards/${currentCardId}`, 'DELETE');
+      if (cardData) {
+        pushUndo({
+          description: `Karte "${cardData.text}" gelöscht`,
+          undo: async () => {
+            await api(`/api/columns/${cardData.column_id}/cards`, 'POST', { text: cardData.text });
+          }
+        });
+      }
       closeModal();
       loadBoard();
     } catch (e) {
       showError(e.message);
     }
+  };
+
+  // Comments
+  document.getElementById('addCommentBtn').onclick = addComment;
+  document.getElementById('commentInput').onkeydown = (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }
   };
 
   // Labels
@@ -543,9 +772,18 @@ function openCardModal(card) {
   document.getElementById('modalCardText').value = card.text;
   const descArea = document.getElementById('modalDescription');
   if (descArea) descArea.value = card.description || '';
+  const dueDateInput = document.getElementById('modalDueDate');
+  if (dueDateInput) {
+    dueDateInput.value = card.due_date || '';
+  }
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
   renderCardLabels(card.labels || []);
+  renderComments(card.comments || []);
+  const archiveBtn = document.getElementById('archiveCardBtn');
+  if (archiveBtn) archiveBtn.style.display = card.archived ? 'none' : '';
+  const restoreBtn = document.getElementById('restoreCardBtn');
+  if (restoreBtn) restoreBtn.style.display = card.archived ? '' : 'none';
   document.getElementById('modalOverlay').classList.remove('hidden');
 }
 
@@ -556,6 +794,8 @@ function closeModal() {
   document.getElementById('fileInput').value = '';
   const dd = document.getElementById('labelDropdown');
   if (dd) dd.classList.add('hidden');
+  const commentInput = document.getElementById('commentInput');
+  if (commentInput) commentInput.value = '';
 }
 
 // --- Labels ---
@@ -960,6 +1200,111 @@ function formatTime(iso) {
   if (diff < 3600) return Math.floor(diff / 60) + ' Min.';
   if (diff < 86400) return Math.floor(diff / 3600) + ' Std.';
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+}
+
+// --- Comments ---
+function renderComments(comments) {
+  const container = document.getElementById('commentsList');
+  if (!container) return;
+  container.innerHTML = '';
+
+  for (const comment of comments) {
+    const item = document.createElement('div');
+    item.className = 'comment-item';
+
+    const text = document.createElement('div');
+    text.className = 'comment-text';
+    text.textContent = comment.text;
+
+    const footer = document.createElement('div');
+    footer.className = 'comment-footer';
+
+    const time = document.createElement('span');
+    time.className = 'comment-time';
+    time.textContent = formatTime(comment.created_at);
+
+    const del = document.createElement('button');
+    del.className = 'comment-delete';
+    del.innerHTML = '&times;';
+    del.onclick = async () => {
+      try {
+        await api(`/api/comments/${comment.id}`, 'DELETE');
+        reloadComments();
+      } catch (e) { showError(e.message); }
+    };
+
+    footer.appendChild(time);
+    footer.appendChild(del);
+    item.appendChild(text);
+    item.appendChild(footer);
+    container.appendChild(item);
+  }
+}
+
+async function addComment() {
+  const input = document.getElementById('commentInput');
+  const text = input.value.trim();
+  if (!text || !currentCardId) return;
+  input.value = '';
+  try {
+    await api(`/api/cards/${currentCardId}/comments`, 'POST', { text });
+    reloadComments();
+  } catch (e) {
+    showError(e.message);
+    input.value = text;
+  }
+}
+
+async function reloadComments() {
+  if (!currentCardId) return;
+  const comments = await api(`/api/cards/${currentCardId}/comments`);
+  renderComments(comments);
+}
+
+// --- Archive Panel ---
+async function toggleArchivePanel() {
+  const panel = document.getElementById('archivePanel');
+  if (!panel) return;
+  if (!panel.classList.contains('hidden')) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  try {
+    const archived = await api(`/api/boards/${boardId}/archived`);
+    const list = document.getElementById('archivedList');
+    list.innerHTML = '';
+
+    if (archived.length === 0) {
+      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Keine archivierten Karten.</p>';
+    } else {
+      for (const card of archived) {
+        const item = document.createElement('div');
+        item.className = 'archived-item';
+
+        const text = document.createElement('span');
+        text.className = 'archived-text';
+        text.textContent = card.text;
+
+        const restoreBtn = document.createElement('button');
+        restoreBtn.className = 'restore-btn';
+        restoreBtn.textContent = 'Wiederherstellen';
+        restoreBtn.onclick = async () => {
+          try {
+            await api(`/api/cards/${card.id}/restore`, 'PUT');
+            toggleArchivePanel(); // refresh
+            loadBoard();
+          } catch (e) { showError(e.message); }
+        };
+
+        item.appendChild(text);
+        item.appendChild(restoreBtn);
+        list.appendChild(item);
+      }
+    }
+
+    panel.classList.remove('hidden');
+  } catch (e) { showError(e.message); }
 }
 
 } // end boardId guard

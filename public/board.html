@@ -41,6 +41,12 @@
           <textarea id="modalDescription" class="modal-description" placeholder="Beschreibung hinzufügen..." rows="3" aria-label="Kartenbeschreibung"></textarea>
         </section>
 
+        <!-- Due Date -->
+        <section class="modal-section">
+          <h3>Fälligkeitsdatum</h3>
+          <input type="date" id="modalDueDate" class="modal-due-date" aria-label="Fälligkeitsdatum">
+        </section>
+
         <!-- Labels -->
         <section class="modal-section">
           <h3>Labels</h3>
@@ -78,8 +84,20 @@
             <span class="upload-hint">oder hierher ziehen</span>
           </div>
         </section>
+
+        <!-- Comments -->
+        <section class="modal-section">
+          <h3>Kommentare</h3>
+          <div id="commentsList" class="comments-list"></div>
+          <div class="add-row">
+            <input id="commentInput" type="text" placeholder="Kommentar..." aria-label="Neuer Kommentar">
+            <button id="addCommentBtn">Senden</button>
+          </div>
+        </section>
       </div>
       <div class="modal-footer">
+        <button id="archiveCardBtn" class="archive-btn">Archivieren</button>
+        <button id="restoreCardBtn" class="restore-btn" style="display:none;">Wiederherstellen</button>
         <button id="deleteCardBtn" class="danger-btn">Karte löschen</button>
       </div>
     </div>
@@ -92,6 +110,15 @@
       <button id="closeActivity" class="icon-btn" aria-label="Schließen">&times;</button>
     </div>
     <div id="activityList" class="activity-list"></div>
+  </div>
+
+  <!-- Archive Panel -->
+  <div id="archivePanel" class="activity-panel hidden" role="complementary" aria-label="Archiv">
+    <div class="activity-header">
+      <h2>Archiv</h2>
+      <button id="closeArchive" class="icon-btn" aria-label="Schließen">&times;</button>
+    </div>
+    <div id="archivedList" class="activity-list"></div>
   </div>
 
   <script src="/app.js"></script>

@@ -757,6 +757,194 @@ main#board {
   font-weight: 700;
 }
 
+/* --- Due Date --- */
+.modal-due-date {
+  padding: 8px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 14px;
+  font-family: inherit;
+  outline: none;
+}
+
+.modal-due-date:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid #2563eb;
+}
+
+/* --- Comments --- */
+.comments-list {
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.comment-item {
+  padding: 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 8px;
+}
+
+.comment-text {
+  font-size: 14px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.comment-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 6px;
+}
+
+.comment-time {
+  font-size: 11px;
+  color: #94a3b8;
+}
+
+.comment-delete {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.comment-item:hover .comment-delete { opacity: 1; }
+.comment-delete:hover { color: #ef4444; }
+
+/* --- Archive Button --- */
+.archive-btn {
+  background: #fef3c7;
+  color: #92400e;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  transition: background 0.15s;
+  margin-right: auto;
+}
+
+.archive-btn:hover { background: #fde68a; }
+
+.restore-btn {
+  background: #d1fae5;
+  color: #065f46;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  margin-right: auto;
+}
+
+.restore-btn:hover { background: #a7f3d0; }
+
+/* --- Archived Items --- */
+.archived-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.archived-text {
+  flex: 1;
+  font-size: 14px;
+}
+
+/* --- Search --- */
+.board-search {
+  padding: 6px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  outline: none;
+  width: 180px;
+  transition: border-color 0.15s, width 0.2s;
+}
+
+.board-search:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid #2563eb;
+  width: 240px;
+}
+
+/* --- Sort --- */
+.board-sort {
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 13px;
+  outline: none;
+  background: #fff;
+  cursor: pointer;
+}
+
+.board-sort:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid #2563eb;
+}
+
+/* --- Board List (index page) --- */
+.board-list {
+  text-align: left;
+}
+
+.board-list-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 16px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  text-decoration: none;
+  color: inherit;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.board-list-item:hover {
+  background: #eff6ff;
+  border-color: #2563eb;
+}
+
+.board-list-title {
+  font-weight: 500;
+  font-size: 15px;
+}
+
+.board-list-date {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.import-section {
+  margin-top: 16px;
+}
+
+.import-label {
+  display: inline-block;
+  padding: 8px 16px;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 0.15s;
+}
+
+.import-label:hover { background: #e2e8f0; }
+
 /* --- Responsive --- */
 @media (max-width: 640px) {
   .column {
@@ -808,4 +996,13 @@ main#board {
   .new-label-row { border-color: #475569; }
   .new-label-row input[type="text"] { background: #334155; color: #e2e8f0; border-color: #475569; }
   .add-label-btn { background: #334155; border-color: #475569; color: #e2e8f0; }
+  .modal-due-date { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .comment-item { border-color: #475569; background: #334155; }
+  .comment-text { color: #e2e8f0; }
+  .board-search { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .board-sort { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .board-list-item { background: #334155; border-color: #475569; color: #e2e8f0; }
+  .board-list-item:hover { background: #1e3a5f; border-color: #2563eb; }
+  .import-label { background: #334155; border-color: #475569; color: #e2e8f0; }
+  .archived-item { border-color: #334155; }
 }

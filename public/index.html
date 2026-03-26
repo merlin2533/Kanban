@@ -87,6 +87,13 @@
         <button type="submit">Erstellen</button>
       </div>
     </form>
+    <div id="boardList" class="board-list"></div>
+    <div class="import-section">
+      <label for="importFile" class="import-label">
+        <span>&#128194; Board importieren (JSON)</span>
+        <input type="file" id="importFile" accept=".json" hidden>
+      </label>
+    </div>
   </div>
   <script>
     document.getElementById('createForm').addEventListener('submit', async (e) => {
@@ -99,6 +106,49 @@
       });
       const board = await res.json();
       window.location.href = '/board/' + board.id;
+    });
+
+    // Load existing boards
+    async function loadBoards() {
+      try {
+        const res = await fetch('/api/boards');
+        const boards = await res.json();
+        const list = document.getElementById('boardList');
+        list.innerHTML = '';
+        if (boards.length > 0) {
+          const heading = document.createElement('h2');
+          heading.textContent = 'Deine Boards';
+          heading.style.cssText = 'font-size:18px;color:#1e293b;margin:24px 0 12px;text-align:left;';
+          list.appendChild(heading);
+          for (const board of boards) {
+            const link = document.createElement('a');
+            link.href = '/board/' + board.id;
+            link.className = 'board-list-item';
+            link.innerHTML = '<span class="board-list-title">' + board.title + '</span><span class="board-list-date">' + new Date(board.created_at + 'Z').toLocaleDateString('de-DE') + '</span>';
+            list.appendChild(link);
+          }
+        }
+      } catch (e) { console.error(e); }
+    }
+    loadBoards();
+
+    // Import board
+    document.getElementById('importFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const res = await fetch('/api/boards/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const board = await res.json();
+        window.location.href = '/board/' + board.id;
+      } catch (err) {
+        alert('Import fehlgeschlagen: ' + err.message);
+      }
     });
 
     if ('serviceWorker' in navigator) {
