@@ -57,6 +57,12 @@ db.exec(`
     details TEXT,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
+  CREATE INDEX IF NOT EXISTS idx_cards_column_id ON cards(column_id);
+  CREATE INDEX IF NOT EXISTS idx_checklist_card_id ON checklist_items(card_id);
+  CREATE INDEX IF NOT EXISTS idx_attachments_card_id ON attachments(card_id);
+  CREATE INDEX IF NOT EXISTS idx_activity_board_id ON activity_log(board_id);
 `);
 
 // --- Helpers ---
@@ -83,25 +89,92 @@ function createBoard(title) {
   return getBoard(id);
 }
 
+// Fix #7: Optimized getBoard — replaces N+1 nested loops with batch queries
 function getBoard(id) {
   const board = db.prepare('SELECT * FROM boards WHERE id = ?').get(id);
   if (!board) return null;
 
   const columns = db.prepare('SELECT * FROM columns WHERE board_id = ? ORDER BY position').all(id);
-  for (const col of columns) {
-    col.cards = db.prepare('SELECT * FROM cards WHERE column_id = ? ORDER BY position').all(col.id);
-    for (const card of col.cards) {
-      card.checklist = db.prepare('SELECT * FROM checklist_items WHERE card_id = ? ORDER BY position').all(card.id);
-      card.attachments = db.prepare('SELECT * FROM attachments WHERE card_id = ? ORDER BY created_at').all(card.id);
-    }
+  if (columns.length === 0) {
+    board.columns = [];
+    return board;
   }
+
+  const columnIds = columns.map(c => c.id);
+  const placeholders = columnIds.map(() => '?').join(',');
+
+  const allCards = db.prepare(
+    `SELECT * FROM cards WHERE column_id IN (${placeholders}) ORDER BY position`
+  ).all(...columnIds);
+
+  const cardIds = allCards.map(c => c.id);
+
+  let allChecklist = [];
+  let allAttachments = [];
+
+  if (cardIds.length > 0) {
+    const cardPlaceholders = cardIds.map(() => '?').join(',');
+    allChecklist = db.prepare(
+      `SELECT * FROM checklist_items WHERE card_id IN (${cardPlaceholders}) ORDER BY position`
+    ).all(...cardIds);
+    allAttachments = db.prepare(
+      `SELECT * FROM attachments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at`
+    ).all(...cardIds);
+  }
+
+  // Build lookup maps
+  const checklistByCard = new Map();
+  for (const item of allChecklist) {
+    if (!checklistByCard.has(item.card_id)) checklistByCard.set(item.card_id, []);
+    checklistByCard.get(item.card_id).push(item);
+  }
+
+  const attachmentsByCard = new Map();
+  for (const att of allAttachments) {
+    if (!attachmentsByCard.has(att.card_id)) attachmentsByCard.set(att.card_id, []);
+    attachmentsByCard.get(att.card_id).push(att);
+  }
+
+  const cardsByColumn = new Map();
+  for (const card of allCards) {
+    card.checklist = checklistByCard.get(card.id) || [];
+    card.attachments = attachmentsByCard.get(card.id) || [];
+    if (!cardsByColumn.has(card.column_id)) cardsByColumn.set(card.column_id, []);
+    cardsByColumn.get(card.column_id).push(card);
+  }
+
+  for (const col of columns) {
+    col.cards = cardsByColumn.get(col.id) || [];
+  }
+
   board.columns = columns;
   return board;
 }
 
+// Fix #9: updateBoard, deleteBoard, getBoards
+function updateBoard(id, title) {
+  db.prepare('UPDATE boards SET title = ? WHERE id = ?').run(title, id);
+  const board = db.prepare('SELECT * FROM boards WHERE id = ?').get(id);
+  if (board) logActivity(id, 'board_updated', { title });
+  return board;
+}
+
+function deleteBoard(id) {
+  const board = db.prepare('SELECT * FROM boards WHERE id = ?').get(id);
+  if (board) db.prepare('DELETE FROM boards WHERE id = ?').run(id);
+  return board;
+}
+
+function getBoards() {
+  return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
+}
+
 // --- Columns ---
 
+// Fix #5: Verify boardId exists before creating column
 function createColumn(boardId, title) {
+  const board = db.prepare('SELECT id FROM boards WHERE id = ?').get(boardId);
+  if (!board) return null;
   const maxPos = db.prepare('SELECT COALESCE(MAX(position), -1) AS m FROM columns WHERE board_id = ?').get(boardId).m;
   const result = db.prepare('INSERT INTO columns (board_id, title, position) VALUES (?, ?, ?)').run(boardId, title, maxPos + 1);
   logActivity(boardId, 'column_created', { title });
@@ -115,13 +188,42 @@ function updateColumn(id, title) {
   return col;
 }
 
+// Fix #6: deleteColumn resequences sibling positions after delete
 function deleteColumn(id) {
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(id);
   if (col) {
     db.prepare('DELETE FROM columns WHERE id = ?').run(id);
+    db.prepare('UPDATE columns SET position = position - 1 WHERE board_id = ? AND position > ?').run(col.board_id, col.position);
     logActivity(col.board_id, 'column_deleted', { title: col.title });
   }
   return col;
+}
+
+// Fix #9: moveColumn — reorder a column within its board
+function moveColumn(id, newPosition) {
+  const move = db.transaction(() => {
+    const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(id);
+    if (!col) return null;
+
+    const maxPos = db.prepare('SELECT COALESCE(MAX(position), 0) AS m FROM columns WHERE board_id = ?').get(col.board_id).m;
+    newPosition = Math.min(Math.max(0, parseInt(newPosition) || 0), maxPos);
+
+    const oldPosition = col.position;
+    if (oldPosition === newPosition) return col;
+
+    if (oldPosition < newPosition) {
+      // Moving right: shift columns between old+1 and newPosition left by 1
+      db.prepare('UPDATE columns SET position = position - 1 WHERE board_id = ? AND position > ? AND position <= ?').run(col.board_id, oldPosition, newPosition);
+    } else {
+      // Moving left: shift columns between newPosition and old-1 right by 1
+      db.prepare('UPDATE columns SET position = position + 1 WHERE board_id = ? AND position >= ? AND position < ?').run(col.board_id, newPosition, oldPosition);
+    }
+
+    db.prepare('UPDATE columns SET position = ? WHERE id = ?').run(newPosition, id);
+    logActivity(col.board_id, 'column_moved', { columnId: id, from: oldPosition, to: newPosition });
+    return db.prepare('SELECT * FROM columns WHERE id = ?').get(id);
+  });
+  return move();
 }
 
 // --- Cards ---
@@ -148,39 +250,73 @@ function updateCard(id, text) {
   return card;
 }
 
+// Fix #6: deleteCard resequences sibling positions after delete
 function deleteCard(id) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   if (card) {
     const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
     db.prepare('DELETE FROM cards WHERE id = ?').run(id);
+    db.prepare('UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ?').run(card.column_id, card.position);
     if (col) logActivity(col.board_id, 'card_deleted', { text: card.text });
   }
   return card;
 }
 
+// Fix #1: same-column moves use range-based updates
+// Fix #2: clamp targetPosition to valid range
+// Fix #3: validate targetColumnId exists
 function moveCard(cardId, targetColumnId, targetPosition) {
   const move = db.transaction(() => {
     const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
     if (!card) return null;
 
+    // Fix #3: verify target column exists
+    const tgtCol = db.prepare('SELECT * FROM columns WHERE id = ?').get(targetColumnId);
+    if (!tgtCol) return null;
+
     const sourceColumnId = card.column_id;
 
-    // Remove from source: shift positions down
-    db.prepare('UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ?').run(sourceColumnId, card.position);
+    // Fix #2: clamp targetPosition to valid range (0..card count in target column)
+    const targetCount = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE column_id = ?').get(targetColumnId).c;
+    // When moving within the same column the card itself is counted, so max is targetCount - 1;
+    // when moving across columns the card will be inserted so max is targetCount.
+    const maxPos = (sourceColumnId === targetColumnId) ? targetCount - 1 : targetCount;
+    targetPosition = Math.min(Math.max(0, parseInt(targetPosition) || 0), maxPos);
 
-    // Make space in target: shift positions up
-    db.prepare('UPDATE cards SET position = position + 1 WHERE column_id = ? AND position >= ?').run(targetColumnId, targetPosition);
+    if (sourceColumnId === targetColumnId) {
+      // Fix #1: same-column move — use range-based position updates to avoid double-shifting
+      const oldPosition = card.position;
+      if (oldPosition === targetPosition) return card;
 
-    // Move card
-    db.prepare("UPDATE cards SET column_id = ?, position = ?, updated_at = datetime('now') WHERE id = ?").run(targetColumnId, targetPosition, cardId);
+      if (oldPosition < targetPosition) {
+        // Moving down: shift cards between old+1 and targetPosition up by -1
+        db.prepare('UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ? AND position <= ?')
+          .run(sourceColumnId, oldPosition, targetPosition);
+      } else {
+        // Moving up: shift cards between targetPosition and old-1 down by +1
+        db.prepare('UPDATE cards SET position = position + 1 WHERE column_id = ? AND position >= ? AND position < ?')
+          .run(sourceColumnId, targetPosition, oldPosition);
+      }
+
+      db.prepare("UPDATE cards SET position = ?, updated_at = datetime('now') WHERE id = ?").run(targetPosition, cardId);
+    } else {
+      // Cross-column move
+      // Remove from source: shift positions down
+      db.prepare('UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ?').run(sourceColumnId, card.position);
+
+      // Make space in target: shift positions up
+      db.prepare('UPDATE cards SET position = position + 1 WHERE column_id = ? AND position >= ?').run(targetColumnId, targetPosition);
+
+      // Move card
+      db.prepare("UPDATE cards SET column_id = ?, position = ?, updated_at = datetime('now') WHERE id = ?").run(targetColumnId, targetPosition, cardId);
+    }
 
     const srcCol = db.prepare('SELECT * FROM columns WHERE id = ?').get(sourceColumnId);
-    const tgtCol = db.prepare('SELECT * FROM columns WHERE id = ?').get(targetColumnId);
     if (srcCol) {
       logActivity(srcCol.board_id, 'card_moved', {
         text: card.text,
         from: srcCol.title,
-        to: tgtCol ? tgtCol.title : 'Unknown'
+        to: tgtCol.title
       });
     }
     return db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
@@ -204,15 +340,16 @@ function createChecklistItem(cardId, text) {
   return db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(result.lastInsertRowid);
 }
 
+// Fix #10: atomic single UPDATE combining text and checked changes
 function updateChecklistItem(id, updates) {
   const item = db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(id);
   if (!item) return null;
-  if (updates.text !== undefined) {
-    db.prepare('UPDATE checklist_items SET text = ? WHERE id = ?').run(updates.text, id);
-  }
-  if (updates.checked !== undefined) {
-    db.prepare('UPDATE checklist_items SET checked = ? WHERE id = ?').run(updates.checked ? 1 : 0, id);
-  }
+
+  const newText    = updates.text    !== undefined ? updates.text              : item.text;
+  const newChecked = updates.checked !== undefined ? (updates.checked ? 1 : 0) : item.checked;
+
+  db.prepare('UPDATE checklist_items SET text = ?, checked = ? WHERE id = ?').run(newText, newChecked, id);
+
   const updated = db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(id);
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(item.card_id);
   if (card) {
@@ -222,19 +359,24 @@ function updateChecklistItem(id, updates) {
   return updated;
 }
 
+// Fix #6: deleteChecklistItem resequences sibling positions after delete
 function deleteChecklistItem(id) {
   const item = db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(id);
-  if (item) db.prepare('DELETE FROM checklist_items WHERE id = ?').run(id);
+  if (item) {
+    db.prepare('DELETE FROM checklist_items WHERE id = ?').run(id);
+    db.prepare('UPDATE checklist_items SET position = position - 1 WHERE card_id = ? AND position > ?').run(item.card_id, item.position);
+  }
   return item;
 }
 
 // --- Attachments ---
 
+// Fix #8: store file.filename (multer-generated name) instead of file.path
 function createAttachment(cardId, file) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
   if (!card) return null;
   const result = db.prepare('INSERT INTO attachments (card_id, filename, filepath, mimetype, size) VALUES (?, ?, ?, ?, ?)').run(
-    cardId, file.originalname, file.path, file.mimetype, file.size
+    cardId, file.originalname, file.filename, file.mimetype, file.size
   );
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
   if (col) logActivity(col.board_id, 'file_uploaded', { cardText: card.text, filename: file.originalname });
@@ -253,13 +395,15 @@ function deleteAttachment(id) {
 
 // --- Activity ---
 
+// Fix #11: cap limit to max 500
 function getActivity(boardId, limit = 50) {
+  limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
   return db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ?').all(boardId, limit);
 }
 
 module.exports = {
-  createBoard, getBoard,
-  createColumn, updateColumn, deleteColumn,
+  createBoard, getBoard, updateBoard, deleteBoard, getBoards,
+  createColumn, updateColumn, deleteColumn, moveColumn,
   createCard, updateCard, deleteCard, moveCard,
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   createAttachment, getAttachment, deleteAttachment,
