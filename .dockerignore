@@ -6,3 +6,8 @@ uploads/*
 !uploads/.gitkeep
 .git
 .gitignore
+.env
+.env.*
+docker-compose.yml
+docker-stack.yml
+*.md

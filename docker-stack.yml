@@ -1,0 +1,76 @@
+version: '3.8'
+
+# Docker Swarm Stack - Deploy with:
+#   docker stack deploy -c docker-stack.yml kanban
+#
+# Required secrets:
+#   echo "your-admin-password" | docker secret create kanban_admin_password -
+#
+# Configure via environment or .env file before deploy
+
+services:
+  kanban:
+    image: ${IMAGE:-ghcr.io/merlin2533/kanban:latest}
+    ports:
+      - target: 3000
+        published: ${PORT:-3000}
+        protocol: tcp
+        mode: ingress
+    volumes:
+      - kanban-data:/data
+      - kanban-uploads:/app/uploads
+    environment:
+      - PORT=3000
+      - DB_PATH=/data/kanban.db
+      - NODE_ENV=production
+      - BASE_URL=${BASE_URL:-http://localhost:3000}
+      - ADMIN_USER=${ADMIN_USER:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 5s
+      resources:
+        limits:
+          memory: 256M
+          cpus: '0.5'
+        reservations:
+          memory: 128M
+          cpus: '0.25'
+      placement:
+        constraints:
+          - node.role == manager
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    networks:
+      - kanban-net
+
+networks:
+  kanban-net:
+    driver: overlay
+
+volumes:
+  kanban-data:
+    driver: local
+  kanban-uploads:
+    driver: local
