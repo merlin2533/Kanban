@@ -141,6 +141,35 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (e.key === 'Enter') { e.preventDefault(); boardTitleEl.blur(); }
   });
 
+  // Board switcher
+  if (!window._accessToken) {
+    const switcherWrap = document.createElement('div');
+    switcherWrap.className = 'board-switcher-wrap';
+    const switcherSelect = document.createElement('select');
+    switcherSelect.className = 'board-switcher';
+    switcherSelect.setAttribute('aria-label', 'Board wechseln');
+    switcherSelect.title = 'Board wechseln';
+    document.querySelector('header').insertBefore(switcherWrap, document.querySelector('.header-actions'));
+    switcherWrap.appendChild(switcherSelect);
+
+    api('/api/boards').then(boards => {
+      switcherSelect.innerHTML = '';
+      for (const b of boards) {
+        const opt = document.createElement('option');
+        opt.value = b.id;
+        opt.textContent = b.title;
+        if (b.id === boardId) opt.selected = true;
+        switcherSelect.appendChild(opt);
+      }
+    }).catch(() => {});
+
+    switcherSelect.onchange = () => {
+      if (switcherSelect.value !== boardId) {
+        window.location.href = '/board/' + switcherSelect.value;
+      }
+    };
+  }
+
   // Search filter
   const searchInput = document.createElement('input');
   searchInput.type = 'search';

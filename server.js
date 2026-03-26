@@ -130,7 +130,9 @@ function requireAdmin(req, res, next) {
 
 function requireBoardAccess(req, boardId) {
   // Admin users can access all boards
-  if (req.user) return true;
+  if (req.user && req.user.is_admin) return true;
+  // Regular users must be board members
+  if (req.user) return db.isBoardMember(boardId, req.user.id);
   // Access link users can only access their linked board
   if (req.accessLink && req.accessLink.board_id === boardId) return true;
   return false;
@@ -254,6 +256,25 @@ app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => 
   res.json({ ok: true });
 });
 
+// --- Board Member Management (admin only) ---
+app.get('/api/boards/:boardId/members', authMiddleware, requireAdmin, (req, res) => {
+  res.json(db.getBoardMembers(req.params.boardId));
+});
+
+app.post('/api/boards/:boardId/members', authMiddleware, requireAdmin, (req, res) => {
+  const userId = validId(req.body.user_id);
+  if (!userId) return res.status(400).json({ error: 'user_id required' });
+  db.addBoardMember(req.params.boardId, userId);
+  res.status(201).json({ ok: true });
+});
+
+app.delete('/api/boards/:boardId/members/:userId', authMiddleware, requireAdmin, (req, res) => {
+  const userId = validId(req.params.userId);
+  if (!userId) return res.status(400).json({ error: 'Invalid user ID' });
+  db.removeBoardMember(req.params.boardId, userId);
+  res.json({ ok: true });
+});
+
 // --- SSE ---
 const sseClients = new Map(); // boardId -> Set of response objects
 const boardPresence = new Map(); // boardId -> Map(username -> { username, connectedAt })
@@ -340,7 +361,8 @@ app.get('/board/:boardId', (req, res) => {
 // --- Boards ---
 app.get('/api/boards', authMiddleware, (req, res) => {
   if (req.user) {
-    res.json(db.getAllBoards());
+    const boards = req.user.is_admin ? db.getAllBoards() : db.getBoardsForUser(req.user.id);
+    res.json(boards);
   } else if (req.accessLink) {
     const board = db.getBoard(req.accessLink.board_id);
     res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
@@ -355,7 +377,9 @@ app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
     title = validString(title, 200);
     if (title === null) return res.status(400).json({ error: 'title must be a non-empty string max 200 chars' });
   }
-  const board = db.createBoard(title);
+  const creatorUserId = req.user ? req.user.id : null;
+  const board = db.createBoard(title, creatorUserId);
+  // If non-admin users exist, add them as members too (admin creates board for team)
   res.status(201).json(board);
 });
 
