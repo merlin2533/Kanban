@@ -312,7 +312,7 @@ function moveColumn(id, newPosition) {
 function createCard(columnId, text) {
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(columnId);
   if (!col) return null;
-  const maxPos = db.prepare('SELECT COALESCE(MAX(position), -1) AS m FROM cards WHERE column_id = ?').get(columnId).m;
+  const maxPos = db.prepare('SELECT COALESCE(MAX(position), -1) AS m FROM cards WHERE column_id = ? AND archived = 0').get(columnId).m;
   const result = db.prepare('INSERT INTO cards (column_id, text, position) VALUES (?, ?, ?)').run(columnId, text, maxPos + 1);
   logActivity(col.board_id, 'card_created', { text, columnTitle: col.title });
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(result.lastInsertRowid);
@@ -358,14 +358,16 @@ function moveCard(cardId, targetColumnId, targetPosition) {
     const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
     if (!card) return null;
 
-    // Fix #3: verify target column exists
+    // Fix #3: verify target column exists and is on the same board
     const tgtCol = db.prepare('SELECT * FROM columns WHERE id = ?').get(targetColumnId);
     if (!tgtCol) return null;
+    const srcCol = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+    if (!srcCol || srcCol.board_id !== tgtCol.board_id) return null;
 
     const sourceColumnId = card.column_id;
 
     // Fix #2: clamp targetPosition to valid range (0..card count in target column)
-    const targetCount = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE column_id = ?').get(targetColumnId).c;
+    const targetCount = db.prepare('SELECT COUNT(*) AS c FROM cards WHERE column_id = ? AND archived = 0').get(targetColumnId).c;
     // When moving within the same column the card itself is counted, so max is targetCount - 1;
     // when moving across columns the card will be inserted so max is targetCount.
     const maxPos = (sourceColumnId === targetColumnId) ? targetCount - 1 : targetCount;
@@ -399,14 +401,12 @@ function moveCard(cardId, targetColumnId, targetPosition) {
       db.prepare("UPDATE cards SET column_id = ?, position = ?, updated_at = datetime('now') WHERE id = ?").run(targetColumnId, targetPosition, cardId);
     }
 
-    const srcCol = db.prepare('SELECT * FROM columns WHERE id = ?').get(sourceColumnId);
-    if (srcCol) {
-      logActivity(srcCol.board_id, 'card_moved', {
-        text: card.text,
-        from: srcCol.title,
-        to: tgtCol.title
-      });
-    }
+    const sourceTitle = db.prepare('SELECT title FROM columns WHERE id = ?').get(sourceColumnId)?.title || '';
+    logActivity(tgtCol.board_id, 'card_moved', {
+      text: card.text,
+      from: sourceTitle,
+      to: tgtCol.title
+    });
     return db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
   });
   return move();
@@ -488,6 +488,8 @@ function getLabels(boardId) {
 }
 
 function createLabel(boardId, name, color) {
+  const board = db.prepare('SELECT id FROM boards WHERE id = ?').get(boardId);
+  if (!board) return null;
   const result = db.prepare('INSERT INTO labels (board_id, name, color) VALUES (?, ?, ?)').run(boardId, name, color || '#2563eb');
   return db.prepare('SELECT * FROM labels WHERE id = ?').get(result.lastInsertRowid);
 }
@@ -520,7 +522,7 @@ function removeLabelFromCard(cardId, labelId) {
 }
 
 function getCardLabels(cardId) {
-  return db.prepare('SELECT l.* FROM labels l JOIN card_labels cl ON l.id = cl.id WHERE cl.card_id = ? ORDER BY l.name').all(cardId);
+  return db.prepare('SELECT l.* FROM labels l JOIN card_labels cl ON l.id = cl.label_id WHERE cl.card_id = ? ORDER BY l.name').all(cardId);
 }
 
 // --- Archive ---
@@ -529,6 +531,8 @@ function archiveCard(id) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   if (!card) return null;
   db.prepare("UPDATE cards SET archived = 1, updated_at = datetime('now') WHERE id = ?").run(id);
+  // Resequence sibling positions
+  db.prepare('UPDATE cards SET position = position - 1 WHERE column_id = ? AND position > ? AND archived = 0').run(card.column_id, card.position);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
   if (col) logActivity(col.board_id, 'card_archived', { text: card.text });
   return db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
@@ -537,7 +541,9 @@ function archiveCard(id) {
 function restoreCard(id) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   if (!card) return null;
-  db.prepare("UPDATE cards SET archived = 0, updated_at = datetime('now') WHERE id = ?").run(id);
+  // Restore to end of column
+  const maxPos = db.prepare('SELECT COALESCE(MAX(position), -1) AS m FROM cards WHERE column_id = ? AND archived = 0').get(card.column_id).m;
+  db.prepare("UPDATE cards SET archived = 0, position = ?, updated_at = datetime('now') WHERE id = ?").run(maxPos + 1, id);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
   if (col) logActivity(col.board_id, 'card_restored', { text: card.text });
   return db.prepare('SELECT * FROM cards WHERE id = ?').get(id);

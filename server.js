@@ -7,10 +7,14 @@ const db = require('./db');
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+
 // --- Middleware ---
-app.use(express.json());
+app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(uploadsDir));
 
 // --- Multer for file uploads ---
 const ALLOWED_MIME = new Set(['image/jpeg','image/png','image/gif','image/webp','application/pdf','text/plain']);
@@ -84,7 +88,13 @@ app.get('/api/boards/:boardId/events', (req, res) => {
   if (!sseClients.has(boardId)) sseClients.set(boardId, new Set());
   sseClients.get(boardId).add(res);
 
+  // SSE keepalive every 30s to prevent proxy timeouts
+  const keepalive = setInterval(() => {
+    try { res.write(': keepalive\n\n'); } catch { clearInterval(keepalive); }
+  }, 30000);
+
   req.on('close', () => {
+    clearInterval(keepalive);
     const clients = sseClients.get(boardId);
     if (clients) {
       clients.delete(res);
@@ -95,10 +105,10 @@ app.get('/api/boards/:boardId/events', (req, res) => {
 
 function broadcast(boardId, event) {
   const clients = sseClients.get(boardId);
-  if (!clients) return;
+  if (!clients || !boardId) return;
   const data = `data: ${JSON.stringify(event)}\n\n`;
   for (const client of clients) {
-    client.write(data);
+    try { client.write(data); } catch { clients.delete(client); }
   }
 }
 
@@ -157,7 +167,8 @@ app.get('/api/boards/:boardId/export', (req, res) => {
   const boardId = req.params.boardId;
   const data = db.exportBoard(boardId);
   if (!data) return res.status(404).json({ error: 'Board not found' });
-  res.setHeader('Content-Disposition', `attachment; filename="${data.title}.json"`);
+  const safeTitle = (data.title || 'board').replace(/[^\w\s-]/g, '_').slice(0, 100);
+  res.setHeader('Content-Disposition', `attachment; filename="${safeTitle}.json"`);
   res.json(data);
 });
 
@@ -252,7 +263,13 @@ app.patch('/api/cards/:cardId', (req, res) => {
     updates.description = typeof req.body.description === 'string' ? req.body.description.slice(0, 5000) : '';
   }
   if (req.body.due_date !== undefined) {
-    updates.due_date = req.body.due_date; // ISO string or null
+    if (req.body.due_date === null || req.body.due_date === '') {
+      updates.due_date = null;
+    } else if (typeof req.body.due_date === 'string' && /^\d{4}-\d{2}-\d{2}/.test(req.body.due_date)) {
+      updates.due_date = req.body.due_date;
+    } else {
+      return res.status(400).json({ error: 'due_date must be ISO date string or null' });
+    }
   }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
   const card = db.updateCard(id, updates);
@@ -483,6 +500,10 @@ app.use((err, req, res, next) => {
 });
 
 // --- Start ---
-app.listen(PORT, () => {
+const server = app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
 });
+
+// Graceful shutdown
+process.on('SIGTERM', () => { server.close(); });
+process.on('SIGINT', () => { server.close(); });

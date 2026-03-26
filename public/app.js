@@ -435,6 +435,13 @@ function createColumnEl(col) {
     }
   };
 
+  if (!canEdit()) {
+    titleInput.onclick = null;
+    titleInput.readOnly = true;
+    titleInput.style.pointerEvents = 'none';
+    deleteBtn.style.display = 'none';
+  }
+
   header.appendChild(titleInput);
   header.appendChild(count);
   header.appendChild(deleteBtn);
@@ -497,6 +504,10 @@ function createColumnEl(col) {
   };
   addCard.appendChild(addInput);
 
+  if (!canEdit()) {
+    addCard.style.display = 'none';
+  }
+
   div.appendChild(header);
   div.appendChild(cardsContainer);
   div.appendChild(addCard);
@@ -507,7 +518,7 @@ function createColumnEl(col) {
 function createCardEl(card) {
   const div = document.createElement('div');
   div.className = 'card';
-  div.draggable = true;
+  div.draggable = canEdit();
   div.dataset.cardId = card.id;
   div.dataset.columnId = card.column_id;
   div.dataset.position = card.position;
@@ -1364,6 +1375,92 @@ async function toggleArchivePanel() {
     }
 
     panel.classList.remove('hidden');
+  } catch (e) { showError(e.message); }
+}
+
+// --- Permissions Panel ---
+async function togglePermissionsPanel() {
+  // Reuse activity panel pattern
+  let panel = document.getElementById('permissionsPanel');
+  if (panel && !panel.classList.contains('hidden')) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'permissionsPanel';
+    panel.className = 'activity-panel';
+    panel.innerHTML = `
+      <div class="activity-header">
+        <h2>Zugriffs-Links</h2>
+        <button class="icon-btn" onclick="document.getElementById('permissionsPanel').classList.add('hidden')" aria-label="Schließen">&times;</button>
+      </div>
+      <div id="accessLinksList" class="activity-list"></div>
+      <div style="padding:12px 20px;border-top:1px solid #e2e8f0;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="newLinkPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            <option value="view">Nur lesen</option>
+            <option value="edit">Bearbeiten</option>
+          </select>
+          <input type="text" id="newLinkLabel" placeholder="Bezeichnung..." style="flex:1;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+          <button onclick="createAccessLink()" style="padding:6px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Erstellen</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+  }
+
+  // Load links
+  try {
+    const links = await api(`/api/boards/${boardId}/access-links`);
+    const list = document.getElementById('accessLinksList');
+    list.innerHTML = '';
+
+    if (links.length === 0) {
+      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Keine Zugriffs-Links.</p>';
+    } else {
+      for (const link of links) {
+        const item = document.createElement('div');
+        item.style.cssText = 'padding:10px 0;border-bottom:1px solid #f1f5f9;';
+
+        const url = window.location.origin + '/board/' + boardId + '?token=' + link.id;
+
+        item.innerHTML = `
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <strong>${link.label || 'Link'}</strong>
+              <span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${link.permission === 'edit' ? '#dbeafe' : '#f1f5f9'};color:${link.permission === 'edit' ? '#2563eb' : '#64748b'};margin-left:4px;">${link.permission === 'edit' ? 'Bearbeiten' : 'Nur lesen'}</span>
+            </div>
+            <div style="display:flex;gap:4px;">
+              <button class="icon-btn" title="Link kopieren" style="font-size:14px;padding:4px 8px;" onclick="navigator.clipboard.writeText('${url}')">&#128279;</button>
+              <button class="icon-btn" title="Löschen" style="font-size:14px;padding:4px 8px;color:#dc2626;" data-link-id="${link.id}">&#128465;</button>
+            </div>
+          </div>
+        `;
+
+        item.querySelector('[data-link-id]').onclick = async () => {
+          try {
+            await api(`/api/access-links/${link.id}`, 'DELETE');
+            togglePermissionsPanel();
+          } catch (e) { showError(e.message); }
+        };
+
+        list.appendChild(item);
+      }
+    }
+
+    panel.classList.remove('hidden');
+  } catch (e) { showError(e.message); }
+}
+
+async function createAccessLink() {
+  const permission = document.getElementById('newLinkPermission').value;
+  const label = document.getElementById('newLinkLabel').value.trim();
+  try {
+    await api(`/api/boards/${boardId}/access-links`, 'POST', { permission, label });
+    document.getElementById('newLinkLabel').value = '';
+    togglePermissionsPanel(); // refresh
   } catch (e) { showError(e.message); }
 }
 
