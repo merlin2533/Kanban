@@ -30,6 +30,48 @@ async function performUndo() {
   updateUndoBtn();
 }
 
+// Auth check - before DOMContentLoaded
+let currentUser = null;
+let currentPermission = 'view';
+
+async function checkAuth() {
+  // Check for access token in URL
+  const params = new URLSearchParams(window.location.search);
+  const token = params.get('token');
+
+  try {
+    const url = token ? `/api/auth/me?token=${token}` : '/api/auth/me';
+    const res = await fetch(url);
+    if (res.ok) {
+      const data = await res.json();
+      currentUser = data.user;
+      currentPermission = 'admin';
+    } else if (token) {
+      // Validate access token via a board API call
+      const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
+      if (boardRes.ok) {
+        currentPermission = 'view'; // will be set properly by server
+        // Store token for subsequent requests
+        window._accessToken = token;
+      } else {
+        window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+        return false;
+      }
+    } else {
+      window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+      return false;
+    }
+  } catch {
+    window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+    return false;
+  }
+  return true;
+}
+
+function canEdit() {
+  return currentPermission === 'admin' || currentPermission === 'edit';
+}
+
 // --- boardId guard ---
 if (!boardId) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -39,6 +81,9 @@ if (!boardId) {
 
 // --- Init ---
 document.addEventListener('DOMContentLoaded', async () => {
+  const authed = await checkAuth();
+  if (!authed) return;
+
   await loadBoard();
   setupActivityPanel();
   setupModal();
@@ -167,6 +212,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   deleteBoard.className = 'icon-btn';
   deleteBoard.innerHTML = '&#128465;'; // trash icon
   deleteBoard.title = 'Board löschen';
+  if (!canEdit()) deleteBoard.style.display = 'none';
   deleteBoard.onclick = async () => {
     if (!confirm('Board komplett löschen? Das kann nicht rückgängig gemacht werden!')) return;
     try {
@@ -177,6 +223,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
   };
   document.querySelector('.header-actions').appendChild(deleteBoard);
+
+  // Permissions button (admin only)
+  if (currentUser && currentUser.is_admin) {
+    const permBtn = document.createElement('button');
+    permBtn.className = 'icon-btn';
+    permBtn.innerHTML = '&#128273;'; // key icon
+    permBtn.title = 'Berechtigungen';
+    permBtn.onclick = togglePermissionsPanel;
+    document.querySelector('.header-actions').insertBefore(permBtn, document.getElementById('activityBtn'));
+  }
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
@@ -214,6 +270,10 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // --- API Helpers ---
 async function api(url, method = 'GET', body = null) {
+  if (window._accessToken) {
+    const separator = url.includes('?') ? '&' : '?';
+    url = url + separator + 'token=' + window._accessToken;
+  }
   const opts = { method, headers: {} };
   if (body && !(body instanceof FormData)) {
     opts.headers['Content-Type'] = 'application/json';

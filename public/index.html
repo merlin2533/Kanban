@@ -96,6 +96,37 @@
     </div>
   </div>
   <script>
+    // Auth check
+    let currentUser = null;
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          // Show settings link and logout
+          const nav = document.createElement('div');
+          nav.style.cssText = 'position:fixed;top:12px;right:12px;display:flex;gap:8px;';
+          nav.innerHTML = '<a href="/settings.html" style="padding:6px 12px;background:#f1f5f9;border-radius:6px;text-decoration:none;color:#475569;font-size:13px;">&#9881; ' + currentUser.username + '</a>';
+          const logoutBtn = document.createElement('button');
+          logoutBtn.textContent = 'Abmelden';
+          logoutBtn.style.cssText = 'padding:6px 12px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-size:13px;';
+          logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload(); };
+          nav.appendChild(logoutBtn);
+          document.body.appendChild(nav);
+
+          if (data.passwordReminder) {
+            if (confirm('Dein Passwort ist älter als 14 Tage. Jetzt ändern?')) {
+              window.location.href = '/settings.html';
+            }
+          }
+        } else {
+          window.location.href = '/login.html';
+        }
+      } catch { window.location.href = '/login.html'; }
+    }
+    checkAuth();
+
     document.getElementById('createForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const title = document.getElementById('title').value.trim() || 'Mein Board';

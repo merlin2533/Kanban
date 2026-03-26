@@ -1,0 +1,177 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Einstellungen - Kanban Board</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+</head>
+<body>
+  <header>
+    <a href="/" class="home-link">&#9633;&#9633;&#9633;</a>
+    <h1>Einstellungen</h1>
+    <div class="header-actions">
+      <button id="logoutBtn" class="icon-btn" title="Abmelden">&#128682;</button>
+    </div>
+  </header>
+
+  <div style="max-width:600px;margin:24px auto;padding:0 16px;">
+    <!-- Password Change -->
+    <div class="settings-card">
+      <h2>Passwort ändern</h2>
+      <p id="passwordAge" style="color:#64748b;font-size:13px;margin-bottom:16px;"></p>
+      <form id="passwordForm">
+        <div class="form-group">
+          <label for="currentPassword">Aktuelles Passwort</label>
+          <input type="password" id="currentPassword" required>
+        </div>
+        <div class="form-group">
+          <label for="newPassword">Neues Passwort (min. 6 Zeichen)</label>
+          <input type="password" id="newPassword" minlength="6" required>
+        </div>
+        <div class="form-group">
+          <label for="confirmPassword">Passwort bestätigen</label>
+          <input type="password" id="confirmPassword" required>
+        </div>
+        <button type="submit" class="btn-primary">Passwort ändern</button>
+        <div id="pwResult" style="margin-top:12px;font-size:13px;"></div>
+      </form>
+    </div>
+
+    <!-- Admin: User Management -->
+    <div class="settings-card" id="adminSection" style="display:none;">
+      <h2>Benutzerverwaltung</h2>
+      <div id="userList"></div>
+      <h3 style="margin-top:16px;font-size:14px;">Neuer Benutzer</h3>
+      <form id="addUserForm" style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
+        <input type="text" id="newUsername" placeholder="Benutzername" required style="flex:1;min-width:120px;">
+        <input type="password" id="newUserPassword" placeholder="Passwort" required style="flex:1;min-width:120px;">
+        <label style="display:flex;align-items:center;gap:4px;font-size:13px;"><input type="checkbox" id="newUserAdmin"> Admin</label>
+        <button type="submit" class="btn-primary" style="padding:8px 16px;">Erstellen</button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    let currentUser = null;
+
+    async function init() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) { window.location.href = '/login.html'; return; }
+        const data = await res.json();
+        currentUser = data.user;
+
+        // Password age
+        const pwAge = document.getElementById('passwordAge');
+        if (data.passwordReminder) {
+          pwAge.textContent = 'Dein Passwort sollte geändert werden (älter als 14 Tage).';
+          pwAge.style.color = '#dc2626';
+        } else {
+          pwAge.textContent = 'Passwort ist aktuell.';
+        }
+
+        // Admin section
+        if (currentUser.is_admin) {
+          document.getElementById('adminSection').style.display = '';
+          loadUsers();
+        }
+      } catch { window.location.href = '/login.html'; }
+    }
+
+    async function loadUsers() {
+      const res = await fetch('/api/admin/users');
+      const users = await res.json();
+      const list = document.getElementById('userList');
+      list.innerHTML = '';
+      for (const user of users) {
+        const div = document.createElement('div');
+        div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0;';
+        div.innerHTML = '<span>' + user.username + (user.is_admin ? ' <strong>(Admin)</strong>' : '') + '</span>';
+        if (user.id !== currentUser.id) {
+          const del = document.createElement('button');
+          del.className = 'danger-btn';
+          del.style.cssText = 'padding:4px 12px;font-size:12px;';
+          del.textContent = 'Löschen';
+          del.onclick = async () => {
+            if (!confirm('Benutzer ' + user.username + ' löschen?')) return;
+            await fetch('/api/admin/users/' + user.id, { method: 'DELETE' });
+            loadUsers();
+          };
+          div.appendChild(del);
+        }
+        list.appendChild(div);
+      }
+    }
+
+    document.getElementById('passwordForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const result = document.getElementById('pwResult');
+      const newPw = document.getElementById('newPassword').value;
+      const confirm = document.getElementById('confirmPassword').value;
+      if (newPw !== confirm) { result.textContent = 'Passwörter stimmen nicht überein.'; result.style.color = '#dc2626'; return; }
+
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword: document.getElementById('currentPassword').value, newPassword: newPw })
+      });
+      const data = await res.json();
+      if (res.ok) {
+        result.textContent = 'Passwort erfolgreich geändert!';
+        result.style.color = '#16a34a';
+        document.getElementById('passwordForm').reset();
+      } else {
+        result.textContent = data.error;
+        result.style.color = '#dc2626';
+      }
+    });
+
+    document.getElementById('addUserForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const res = await fetch('/api/admin/users', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          username: document.getElementById('newUsername').value,
+          password: document.getElementById('newUserPassword').value,
+          is_admin: document.getElementById('newUserAdmin').checked
+        })
+      });
+      if (res.ok) { document.getElementById('addUserForm').reset(); loadUsers(); }
+      else { const d = await res.json(); alert(d.error); }
+    });
+
+    document.getElementById('logoutBtn').onclick = async () => {
+      await fetch('/api/auth/logout', { method: 'POST' });
+      window.location.href = '/login.html';
+    };
+
+    init();
+  </script>
+  <style>
+    .settings-card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 16px;
+      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+    }
+    .settings-card h2 { font-size: 18px; margin-bottom: 12px; }
+    .form-group { margin-bottom: 12px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    .form-group input { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; }
+    .btn-primary { padding: 10px 20px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
+    .btn-primary:hover { background: #1d4ed8; }
+    @media (prefers-color-scheme: dark) {
+      .settings-card { background: #1e293b; }
+      .settings-card h2 { color: #e2e8f0; }
+      .form-group label { color: #94a3b8; }
+      .form-group input { background: #334155; color: #e2e8f0; border-color: #475569; }
+    }
+  </style>
+</body>
+</html>
