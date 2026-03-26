@@ -90,10 +90,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // SSE real-time sync
   const eventSource = new EventSource(`/api/boards/${boardId}/events`);
+  let sseDebounceTimer = null;
   eventSource.onmessage = (e) => {
     const event = JSON.parse(e.data);
     if (event.type === 'update') {
-      loadBoard(); // reload board on any change
+      clearTimeout(sseDebounceTimer);
+      sseDebounceTimer = setTimeout(() => loadBoard(), 500);
     }
   };
   eventSource.onerror = () => {
@@ -321,6 +323,37 @@ async function loadBoard() {
   }
 }
 
+function handleColumnDragOver(e) {
+  if (!e.dataTransfer.types.includes('text/column')) return;
+  e.preventDefault();
+  e.dataTransfer.dropEffect = 'move';
+}
+
+async function handleColumnDrop(e) {
+  const colId = e.dataTransfer.getData('text/column');
+  if (!colId) return;
+  e.preventDefault();
+
+  const boardEl = document.getElementById('board');
+  // Find target position based on drop location
+  const columns = [...boardEl.querySelectorAll('.column:not(.dragging)')];
+  let targetPos = columns.length;
+  for (let i = 0; i < columns.length; i++) {
+    const rect = columns[i].getBoundingClientRect();
+    if (e.clientX < rect.left + rect.width / 2) {
+      targetPos = i;
+      break;
+    }
+  }
+
+  try {
+    await api(`/api/columns/${colId}/move`, 'PUT', { position: targetPos });
+    loadBoard();
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 function renderBoard() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
@@ -329,52 +362,57 @@ function renderBoard() {
     boardEl.appendChild(createColumnEl(col));
   }
 
-  // Column drop zones
-  boardEl.addEventListener('dragover', (e) => {
-    if (!e.dataTransfer.types.includes('text/column')) return;
-    e.preventDefault();
-    e.dataTransfer.dropEffect = 'move';
-  });
+  // Column drop zones — attach once only
+  if (!boardEl._columnDragSetup) {
+    boardEl.addEventListener('dragover', handleColumnDragOver);
+    boardEl.addEventListener('drop', handleColumnDrop);
+    boardEl._columnDragSetup = true;
+  }
 
-  boardEl.addEventListener('drop', async (e) => {
-    const colId = e.dataTransfer.getData('text/column');
-    if (!colId) return;
-    e.preventDefault();
+  // Add column inline area
+  const addColDiv = document.createElement('div');
+  addColDiv.className = 'add-column-area';
 
-    // Find target position based on drop location
-    const columns = [...boardEl.querySelectorAll('.column:not(.dragging)')];
-    let targetPos = columns.length;
-    for (let i = 0; i < columns.length; i++) {
-      const rect = columns[i].getBoundingClientRect();
-      if (e.clientX < rect.left + rect.width / 2) {
-        targetPos = i;
-        break;
-      }
-    }
-
-    try {
-      await api(`/api/columns/${colId}/move`, 'PUT', { position: targetPos });
-      loadBoard();
-    } catch (err) {
-      showError(err.message);
-    }
-  });
-
-  // Add column button
   const addBtn = document.createElement('button');
   addBtn.className = 'add-column-btn';
   addBtn.textContent = '+ Spalte hinzufügen';
-  addBtn.onclick = async () => {
-    const title = prompt('Spaltenname:');
-    if (!title) return;
-    try {
-      await api(`/api/boards/${boardId}/columns`, 'POST', { title });
-      loadBoard();
-    } catch (e) {
-      showError(e.message);
+
+  const addColInput = document.createElement('input');
+  addColInput.className = 'add-column-input';
+  addColInput.placeholder = 'Spaltenname...';
+  addColInput.style.display = 'none';
+
+  addBtn.onclick = () => {
+    addBtn.style.display = 'none';
+    addColInput.style.display = '';
+    addColInput.focus();
+  };
+
+  addColInput.onkeydown = async (e) => {
+    if (e.key === 'Enter' && addColInput.value.trim()) {
+      try {
+        await api(`/api/boards/${boardId}/columns`, 'POST', { title: addColInput.value.trim() });
+        addColInput.value = '';
+        loadBoard();
+      } catch (err) { showError(err.message); }
+    }
+    if (e.key === 'Escape') {
+      addColInput.value = '';
+      addColInput.style.display = 'none';
+      addBtn.style.display = '';
     }
   };
-  boardEl.appendChild(addBtn);
+
+  addColInput.onblur = () => {
+    if (!addColInput.value.trim()) {
+      addColInput.style.display = 'none';
+      addBtn.style.display = '';
+    }
+  };
+
+  addColDiv.appendChild(addBtn);
+  addColDiv.appendChild(addColInput);
+  boardEl.appendChild(addColDiv);
 }
 
 // --- Column ---
@@ -441,6 +479,28 @@ function createColumnEl(col) {
     titleInput.style.pointerEvents = 'none';
     deleteBtn.style.display = 'none';
   }
+
+  if (col.wip_limit > 0) {
+    const wipBadge = document.createElement('span');
+    wipBadge.className = 'wip-badge';
+    wipBadge.textContent = `max ${col.wip_limit}`;
+    if (col.cards.length >= col.wip_limit) {
+      wipBadge.classList.add('wip-exceeded');
+    }
+    header.insertBefore(wipBadge, deleteBtn);
+  }
+
+  count.ondblclick = async () => {
+    const limit = prompt('WIP-Limit setzen (0 = kein Limit):', col.wip_limit || '0');
+    if (limit === null) return;
+    const num = parseInt(limit);
+    if (isNaN(num) || num < 0) return;
+    try {
+      await api(`/api/columns/${col.id}`, 'PATCH', { wip_limit: num });
+      loadBoard();
+    } catch (e) { showError(e.message); }
+  };
+  count.title = 'Doppelklick: WIP-Limit setzen';
 
   header.appendChild(titleInput);
   header.appendChild(count);
@@ -958,6 +1018,7 @@ async function createNewLabel() {
   nameInput.value = '';
   try {
     const label = await api(`/api/boards/${boardId}/labels`, 'POST', { name, color: colorInput.value });
+    if (!board.labels) board.labels = [];
     board.labels.push(label);
     renderLabelPicker();
   } catch (e) {
@@ -1169,6 +1230,12 @@ function setupActivityPanel() {
   document.getElementById('closeActivity').onclick = () => {
     document.getElementById('activityPanel').classList.add('hidden');
   };
+  const closeArchiveBtn = document.getElementById('closeArchive');
+  if (closeArchiveBtn) {
+    closeArchiveBtn.onclick = () => {
+      document.getElementById('archivePanel').classList.add('hidden');
+    };
+  }
 }
 
 async function toggleActivity() {
@@ -1253,7 +1320,7 @@ function formatAction(action, details) {
     checklist_item_added: () => `Checklist-Item zu <strong>${esc(details.cardText)}</strong> hinzugefügt`,
     checklist_item_updated: () => `Checklist-Item in <strong>${esc(details.cardText)}</strong> aktualisiert`,
   };
-  return (actions[action] || (() => action))();
+  return (actions[action] || (() => esc(action)))();
 }
 
 function esc(str) {
@@ -1328,8 +1395,12 @@ async function addComment() {
 
 async function reloadComments() {
   if (!currentCardId) return;
-  const comments = await api(`/api/cards/${currentCardId}/comments`);
-  renderComments(comments);
+  try {
+    const comments = await api(`/api/cards/${currentCardId}/comments`);
+    renderComments(comments);
+  } catch (e) {
+    showError(e.message);
+  }
 }
 
 // --- Archive Panel ---
@@ -1363,8 +1434,9 @@ async function toggleArchivePanel() {
         restoreBtn.onclick = async () => {
           try {
             await api(`/api/cards/${card.id}/restore`, 'PUT');
-            toggleArchivePanel(); // refresh
+            document.getElementById('archivePanel').classList.add('hidden');
             loadBoard();
+            setTimeout(() => toggleArchivePanel(), 300);
           } catch (e) { showError(e.message); }
         };
 

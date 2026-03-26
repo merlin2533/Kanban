@@ -73,6 +73,19 @@
       margin-bottom: 16px;
     }
     .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f172a; }
+      .container { background: #1e293b; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+      h1 { color: #e2e8f0; }
+      p { color: #94a3b8; }
+      input { background: #334155; color: #e2e8f0; border-color: #475569; }
+      input:focus { border-color: #2563eb; }
+      button { background: #2563eb; }
+      .board-list-item { background: #334155; border-color: #475569; color: #e2e8f0; }
+      .board-list-item:hover { background: #1e3a5f; border-color: #2563eb; }
+      .board-list-title { color: #e2e8f0; }
+      .import-label { background: #334155; border-color: #475569; color: #e2e8f0; }
+    }
   </style>
 </head>
 <body>
@@ -155,7 +168,14 @@
             const link = document.createElement('a');
             link.href = '/board/' + board.id;
             link.className = 'board-list-item';
-            link.innerHTML = '<span class="board-list-title">' + board.title + '</span><span class="board-list-date">' + new Date(board.created_at + 'Z').toLocaleDateString('de-DE') + '</span>';
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'board-list-title';
+            titleSpan.textContent = board.title;
+            const dateSpan = document.createElement('span');
+            dateSpan.className = 'board-list-date';
+            dateSpan.textContent = new Date(board.created_at + 'Z').toLocaleDateString('de-DE');
+            link.appendChild(titleSpan);
+            link.appendChild(dateSpan);
             list.appendChild(link);
           }
         }
