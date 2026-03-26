@@ -15,6 +15,7 @@ self.addEventListener('install', (e) => {
     caches.open(CACHE_NAME)
       .then(cache => cache.addAll(STATIC_ASSETS))
       .then(() => self.skipWaiting())
+      .catch(err => console.error('SW install failed:', err))
   );
 });
 
@@ -33,7 +34,22 @@ self.addEventListener('fetch', (e) => {
 
   // API calls & uploads: always network
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) {
-    e.respondWith(fetch(e.request));
+    e.respondWith(
+      fetch(e.request).catch(() =>
+        new Response(JSON.stringify({ error: 'offline' }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' }
+        })
+      )
+    );
+    return;
+  }
+
+  // Navigation requests: fallback to board.html for /board/* routes
+  if (e.request.mode === 'navigate') {
+    e.respondWith(
+      fetch(e.request).catch(() => caches.match('/board.html'))
+    );
     return;
   }
 
@@ -54,10 +70,15 @@ self.addEventListener('fetch', (e) => {
 
 // Push notifications
 self.addEventListener('push', (e) => {
-  const data = e.data ? e.data.json() : { title: 'Kanban', body: 'Neue Aktivität auf deinem Board' };
+  let data;
+  try {
+    data = e.data ? e.data.json() : {};
+  } catch {
+    data = { title: 'Kanban', body: e.data ? e.data.text() : 'Neue Aktivität' };
+  }
   e.waitUntil(
-    self.registration.showNotification(data.title, {
-      body: data.body,
+    self.registration.showNotification(data.title || 'Kanban', {
+      body: data.body || 'Neue Aktivität auf deinem Board',
       icon: '/icons/icon-192.svg',
       badge: '/icons/icon-192.svg'
     })
@@ -66,5 +87,5 @@ self.addEventListener('push', (e) => {
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  e.waitUntil(clients.openWindow('/'));
+  e.waitUntil(self.clients.openWindow('/'));
 });

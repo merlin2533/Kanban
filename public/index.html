@@ -6,7 +6,12 @@
   <title>Kanban Board</title>
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
+  <meta name="color-scheme" content="light dark">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="description" content="Einfaches selbst-gehostetes Kanban Board">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -47,7 +52,7 @@
       border: 2px solid #e2e8f0;
       border-radius: 10px;
       font-size: 16px;
-      outline: none;
+      outline: 2px solid transparent;
       transition: border-color 0.2s;
     }
     input:focus { border-color: #2563eb; }
@@ -68,6 +73,20 @@
       font-size: 48px;
       margin-bottom: 16px;
     }
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f172a; }
+      .container { background: #1e293b; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
+      h1 { color: #e2e8f0; }
+      p { color: #94a3b8; }
+      input { background: #334155; color: #e2e8f0; border-color: #475569; }
+      input:focus { border-color: #2563eb; }
+      button { background: #2563eb; }
+      .board-list-item { background: #334155; border-color: #475569; color: #e2e8f0; }
+      .board-list-item:hover { background: #1e3a5f; border-color: #2563eb; }
+      .board-list-title { color: #e2e8f0; }
+      .import-label { background: #334155; border-color: #475569; color: #e2e8f0; }
+    }
   </style>
 </head>
 <body>
@@ -77,12 +96,51 @@
     <p>Erstelle ein neues Board und teile den Link mit deinem Team.</p>
     <form id="createForm">
       <div class="form-group">
+        <label for="title" class="sr-only">Board-Name</label>
         <input type="text" id="title" placeholder="Board-Name..." autofocus>
         <button type="submit">Erstellen</button>
       </div>
     </form>
+    <div id="boardList" class="board-list"></div>
+    <div class="import-section">
+      <label for="importFile" class="import-label">
+        <span>&#128194; Board importieren (JSON)</span>
+        <input type="file" id="importFile" accept=".json" hidden>
+      </label>
+    </div>
   </div>
   <script>
+    // Auth check
+    let currentUser = null;
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/auth/me');
+        if (res.ok) {
+          const data = await res.json();
+          currentUser = data.user;
+          // Show settings link and logout
+          const nav = document.createElement('div');
+          nav.style.cssText = 'position:fixed;top:12px;right:12px;display:flex;gap:8px;';
+          nav.innerHTML = '<a href="/settings.html" style="padding:6px 12px;background:#f1f5f9;border-radius:6px;text-decoration:none;color:#475569;font-size:13px;">&#9881; ' + currentUser.username + '</a>';
+          const logoutBtn = document.createElement('button');
+          logoutBtn.textContent = 'Abmelden';
+          logoutBtn.style.cssText = 'padding:6px 12px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-size:13px;';
+          logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method: 'POST' }); window.location.reload(); };
+          nav.appendChild(logoutBtn);
+          document.body.appendChild(nav);
+
+          if (data.passwordReminder) {
+            if (confirm('Dein Passwort ist älter als 14 Tage. Jetzt ändern?')) {
+              window.location.href = '/settings.html';
+            }
+          }
+        } else {
+          window.location.href = '/login.html';
+        }
+      } catch { window.location.href = '/login.html'; }
+    }
+    checkAuth();
+
     document.getElementById('createForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const title = document.getElementById('title').value.trim() || 'Mein Board';
@@ -95,8 +153,58 @@
       window.location.href = '/board/' + board.id;
     });
 
+    // Load existing boards
+    async function loadBoards() {
+      try {
+        const res = await fetch('/api/boards');
+        const boards = await res.json();
+        const list = document.getElementById('boardList');
+        list.innerHTML = '';
+        if (boards.length > 0) {
+          const heading = document.createElement('h2');
+          heading.textContent = 'Deine Boards';
+          heading.style.cssText = 'font-size:18px;color:#1e293b;margin:24px 0 12px;text-align:left;';
+          list.appendChild(heading);
+          for (const board of boards) {
+            const link = document.createElement('a');
+            link.href = '/board/' + board.id;
+            link.className = 'board-list-item';
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'board-list-title';
+            titleSpan.textContent = board.title;
+            const dateSpan = document.createElement('span');
+            dateSpan.className = 'board-list-date';
+            dateSpan.textContent = new Date(board.created_at + 'Z').toLocaleDateString('de-DE');
+            link.appendChild(titleSpan);
+            link.appendChild(dateSpan);
+            list.appendChild(link);
+          }
+        }
+      } catch (e) { console.error(e); }
+    }
+    loadBoards();
+
+    // Import board
+    document.getElementById('importFile').addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const data = JSON.parse(text);
+        const res = await fetch('/api/boards/import', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(data)
+        });
+        const board = await res.json();
+        window.location.href = '/board/' + board.id;
+      } catch (err) {
+        alert('Import fehlgeschlagen: ' + err.message);
+      }
+    });
+
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
+      navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW:', err));
     }
   </script>
 </body>

@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Login - Kanban Board</title>
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="description" content="Kanban Board Login">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .container {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 4px 24px rgba(0,0,0,0.1);
+      padding: 48px;
+      max-width: 400px;
+      width: 90%;
+      text-align: center;
+    }
+    .logo { font-size: 48px; margin-bottom: 16px; }
+    h1 { font-size: 24px; color: #1e293b; margin-bottom: 8px; }
+    p { color: #64748b; margin-bottom: 24px; font-size: 14px; }
+    .form-group { margin-bottom: 16px; text-align: left; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    input {
+      width: 100%;
+      padding: 10px 14px;
+      border: 2px solid #e2e8f0;
+      border-radius: 8px;
+      font-size: 15px;
+      outline: 2px solid transparent;
+      transition: border-color 0.2s;
+    }
+    input:focus { border-color: #2563eb; }
+    button {
+      width: 100%;
+      padding: 12px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    button:hover { background: #1d4ed8; }
+    .error { color: #dc2626; font-size: 13px; margin-top: 12px; display: none; }
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f172a; }
+      .container { background: #1e293b; }
+      h1 { color: #e2e8f0; }
+      p { color: #94a3b8; }
+      label { color: #94a3b8; }
+      input { background: #334155; color: #e2e8f0; border-color: #475569; }
+      input:focus { border-color: #2563eb; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="logo">&#128274;</div>
+    <h1>Kanban Login</h1>
+    <p>Melde dich an um auf deine Boards zuzugreifen.</p>
+    <form id="loginForm">
+      <div class="form-group">
+        <label for="username">Benutzername</label>
+        <input type="text" id="username" autocomplete="username" required autofocus>
+      </div>
+      <div class="form-group">
+        <label for="password">Passwort</label>
+        <input type="password" id="password" autocomplete="current-password" required>
+      </div>
+      <button type="submit">Anmelden</button>
+      <div class="error" id="errorMsg"></div>
+    </form>
+  </div>
+  <script>
+    // Check if already logged in
+    fetch('/api/auth/me').then(r => {
+      if (r.ok) {
+        const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        window.location.href = redirect;
+      }
+    });
+
+    document.getElementById('loginForm').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const errorEl = document.getElementById('errorMsg');
+      errorEl.style.display = 'none';
+
+      const username = document.getElementById('username').value;
+      const password = document.getElementById('password').value;
+
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+
+        if (!res.ok) {
+          errorEl.textContent = data.error || 'Login fehlgeschlagen';
+          errorEl.style.display = 'block';
+          return;
+        }
+
+        if (data.passwordReminder) {
+          if (confirm('Dein Passwort wurde vor über 14 Tagen gesetzt. Möchtest du es jetzt ändern?')) {
+            window.location.href = '/settings.html';
+            return;
+          }
+        }
+
+        const redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
+        window.location.href = redirect;
+      } catch (err) {
+        errorEl.textContent = 'Verbindungsfehler';
+        errorEl.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>
