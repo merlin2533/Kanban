@@ -139,16 +139,20 @@
         }
       } catch { window.location.href = '/login.html'; }
     }
-    checkAuth();
+    checkAuth().then(() => {
+      loadBoards();
+      loadTemplates();
+    });
 
     document.getElementById('createForm').addEventListener('submit', async (e) => {
       e.preventDefault();
       const title = document.getElementById('title').value.trim() || 'Mein Board';
       const res = await fetch('/api/boards', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
         body: JSON.stringify({ title })
       });
+      if (!res.ok) return;
       const board = await res.json();
       window.location.href = '/board/' + board.id;
     });
@@ -182,7 +186,6 @@
         }
       } catch (e) { console.error(e); }
     }
-    loadBoards();
 
     async function loadTemplates() {
       try {
@@ -226,8 +229,6 @@
         }
       } catch {}
     }
-    loadTemplates();
-
     // Import board
     document.getElementById('importFile').addEventListener('change', async (e) => {
       const file = e.target.files[0];
@@ -237,7 +238,7 @@
         const data = JSON.parse(text);
         const res = await fetch('/api/boards/import', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
           body: JSON.stringify(data)
         });
         const board = await res.json();
