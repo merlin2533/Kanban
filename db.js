@@ -188,6 +188,27 @@ try {
   db.exec("ALTER TABLE cards ADD COLUMN priority TEXT DEFAULT NULL");
 }
 
+// Migration: populate board_members for existing boards if table is empty
+// (backward-compat: before board_members existed, all users had access to all boards)
+{
+  const memberCount = db.prepare('SELECT COUNT(*) as c FROM board_members').get().c;
+  const existingBoardCount = db.prepare('SELECT COUNT(*) as c FROM boards').get().c;
+  const existingUserCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
+  if (memberCount === 0 && existingBoardCount > 0 && existingUserCount > 0) {
+    const insertMember = db.prepare('INSERT OR IGNORE INTO board_members (board_id, user_id, role) VALUES (?, ?, ?)');
+    const allBoards = db.prepare('SELECT id FROM boards').all();
+    const allUsers = db.prepare('SELECT id FROM users').all();
+    const populateAll = db.transaction(() => {
+      for (const board of allBoards) {
+        for (const user of allUsers) {
+          insertMember.run(board.id, user.id, 'editor');
+        }
+      }
+    });
+    populateAll();
+  }
+}
+
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 if (userCount === 0) {
   const adminPw = process.env.ADMIN_PASSWORD || 'admin';
@@ -230,7 +251,15 @@ function changePassword(userId, newPassword) {
 
 function createSession(userId) {
   const id = nanoid();
-  const expires = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(); // 30 days
+  // Store as SQLite datetime format so datetime('now') comparisons work correctly
+  const expiresMs = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const d = new Date(expiresMs);
+  const expires = d.getUTCFullYear() + '-' +
+    String(d.getUTCMonth() + 1).padStart(2, '0') + '-' +
+    String(d.getUTCDate()).padStart(2, '0') + ' ' +
+    String(d.getUTCHours()).padStart(2, '0') + ':' +
+    String(d.getUTCMinutes()).padStart(2, '0') + ':' +
+    String(d.getUTCSeconds()).padStart(2, '0');
   db.prepare('INSERT INTO sessions (id, user_id, expires_at) VALUES (?, ?, ?)').run(id, userId, expires);
   return { id, expires_at: expires };
 }
