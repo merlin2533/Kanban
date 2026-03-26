@@ -53,6 +53,7 @@
         <label style="display:flex;align-items:center;gap:4px;font-size:13px;"><input type="checkbox" id="newUserAdmin"> Admin</label>
         <button type="submit" class="btn-primary" style="padding:8px 16px;">Erstellen</button>
       </form>
+      <div id="addUserError" style="display:none;color:#dc2626;font-size:13px;margin-top:8px;"></div>
     </div>
 
     <!-- Admin: Board Access Control -->
@@ -68,9 +69,8 @@
 
     async function init() {
       try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) { window.location.href = '/login.html'; return; }
-        const data = await res.json();
+        const data = await fetch('/api/auth/status').then(r => r.json());
+        if (!data.authenticated) { window.location.href = '/login.html'; return; }
         currentUser = data.user;
 
         // Password age
@@ -241,8 +241,8 @@
           is_admin: document.getElementById('newUserAdmin').checked
         })
       });
-      if (res.ok) { document.getElementById('addUserForm').reset(); loadUsers(); }
-      else { const d = await res.json(); alert(d.error); }
+      if (res.ok) { document.getElementById('addUserError').style.display='none'; document.getElementById('addUserForm').reset(); loadUsers(); }
+      else { const d = await res.json(); const e=document.getElementById('addUserError'); e.textContent=d.error||'Fehler'; e.style.display='block'; }
     });
 
     document.getElementById('logoutBtn').onclick = async () => {

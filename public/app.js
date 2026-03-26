@@ -40,26 +40,33 @@ async function checkAuth() {
   const token = params.get('token');
 
   try {
-    const url = token ? `/api/auth/me?token=${token}` : '/api/auth/me';
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      currentUser = data.user;
-      currentPermission = 'admin';
-    } else if (token) {
-      // Validate access token via a board API call
-      const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
-      if (boardRes.ok) {
-        currentPermission = 'view'; // will be set properly by server
-        // Store token for subsequent requests
-        window._accessToken = token;
+    if (token) {
+      // Try session auth first, fall back to access token
+      const res = await fetch(`/api/auth/me?token=${token}`);
+      if (res.ok) {
+        const data = await res.json();
+        currentUser = data.user;
+        currentPermission = 'admin';
+      } else {
+        // Validate access token via a board API call
+        const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
+        if (boardRes.ok) {
+          currentPermission = 'view';
+          window._accessToken = token;
+        } else {
+          window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+          return false;
+        }
+      }
+    } else {
+      const data = await fetch('/api/auth/status').then(r => r.json());
+      if (data.authenticated) {
+        currentUser = data.user;
+        currentPermission = 'admin';
       } else {
         window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
         return false;
       }
-    } else {
-      window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
-      return false;
     }
   } catch {
     window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
@@ -379,7 +386,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     }
     if (e.key === '?' && !e.ctrlKey) {
       // Show shortcuts help
-      alert('Tastaturkürzel:\n\nn - Neue Karte\nf - Suche\nEsc - Schließen\n? - Diese Hilfe');
+      showShortcutsHelp();
       e.preventDefault();
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
@@ -418,6 +425,17 @@ function showError(msg) {
   toast.textContent = msg;
   document.body.appendChild(toast);
   setTimeout(() => toast.remove(), 4000);
+}
+
+function showShortcutsHelp() {
+  const existing = document.getElementById('shortcutsModal');
+  if (existing) { existing.remove(); return; }
+  const modal = document.createElement('div');
+  modal.id = 'shortcutsModal';
+  modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
+  modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.2);"><h3 style="margin:0 0 16px;font-size:16px;">Tastaturkürzel</h3><table style="border-collapse:collapse;font-size:14px;"><tr><td style="padding:4px 16px 4px 0;"><kbd>n</kbd></td><td>Neue Karte</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>f</kbd></td><td>Suche</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+Z</kbd></td><td>Rückgängig</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Esc</kbd></td><td>Schließen</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>?</kbd></td><td>Diese Hilfe</td></tr></table><button onclick="document.getElementById(\'shortcutsModal\').remove()" style="margin-top:16px;padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Schließen</button></div>';
+  modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+  document.body.appendChild(modal);
 }
 
 // --- Loading helper ---
@@ -1595,7 +1613,7 @@ function renderMarkdown(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/\[(.+?)\]\((https?:\/\/[^\s)]+)\)/g, '<a href="$2" target="_blank" rel="noopener">$1</a>')
+    .replace(/\[(.+?)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
     .replace(/\n/g, '<br>');
