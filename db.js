@@ -230,7 +230,7 @@ function deleteBoardAccessLink(id) {
   return link;
 }
 
-function getUserBoards(userId) {
+function getAllBoards() {
   return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
 }
 
@@ -825,5 +825,5 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getUserBoards, getUsers, deleteUser,
+  getAllBoards, getUsers, deleteUser,
 };

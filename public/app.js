@@ -89,7 +89,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModal();
 
   // SSE real-time sync
-  const eventSource = new EventSource(`/api/boards/${boardId}/events`);
+  const sseUrl = `/api/boards/${boardId}/events` + (window._accessToken ? `?token=${window._accessToken}` : '');
+  const eventSource = new EventSource(sseUrl);
   let sseDebounceTimer = null;
   eventSource.onmessage = (e) => {
     const event = JSON.parse(e.data);
@@ -165,6 +166,27 @@ document.addEventListener('DOMContentLoaded', async () => {
     renderBoard();
   };
 
+  // Label filter
+  const labelFilter = document.createElement('select');
+  labelFilter.className = 'board-sort';
+  labelFilter.id = 'labelFilter';
+  labelFilter.setAttribute('aria-label', 'Label-Filter');
+  labelFilter.innerHTML = '<option value="">Alle Labels</option>';
+  document.querySelector('header').insertBefore(labelFilter, document.querySelector('.header-actions'));
+
+  labelFilter.onchange = () => {
+    const selectedLabel = labelFilter.value;
+    document.querySelectorAll('.card').forEach(card => {
+      if (!selectedLabel) {
+        card.style.display = '';
+        return;
+      }
+      const dots = card.querySelectorAll('.card-label-dot');
+      const hasLabel = [...dots].some(dot => dot.title === selectedLabel);
+      card.style.display = hasLabel ? '' : 'none';
+    });
+  };
+
   // Export button
   const exportBtn = document.createElement('button');
   exportBtn.className = 'icon-btn';
@@ -208,11 +230,28 @@ document.addEventListener('DOMContentLoaded', async () => {
   shareBtn.innerHTML = '&#128279;'; // link icon
   shareBtn.title = 'Link kopieren';
   shareBtn.onclick = () => {
-    navigator.clipboard.writeText(window.location.href).then(() => {
-      const orig = shareBtn.innerHTML;
-      shareBtn.innerHTML = '&#10003;'; // checkmark
-      setTimeout(() => { shareBtn.innerHTML = orig; }, 2000);
-    }).catch(() => showError('Link konnte nicht kopiert werden'));
+    const url = window.location.href;
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(() => {
+        const orig = shareBtn.innerHTML;
+        shareBtn.innerHTML = '&#10003;';
+        setTimeout(() => { shareBtn.innerHTML = orig; }, 2000);
+      }).catch(() => showError('Link konnte nicht kopiert werden'));
+    } else {
+      // Fallback for non-HTTPS
+      const textarea = document.createElement('textarea');
+      textarea.value = url;
+      textarea.style.cssText = 'position:fixed;left:-9999px;';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        const orig = shareBtn.innerHTML;
+        shareBtn.innerHTML = '&#10003;';
+        setTimeout(() => { shareBtn.innerHTML = orig; }, 2000);
+      } catch { showError('Kopieren fehlgeschlagen - HTTPS erforderlich'); }
+      document.body.removeChild(textarea);
+    }
   };
   document.querySelector('.header-actions').insertBefore(shareBtn, document.getElementById('activityBtn'));
 
@@ -347,6 +386,20 @@ async function loadBoard() {
     document.getElementById('boardTitle').textContent = board.title;
     document.title = board.title + ' - Kanban';
     renderBoard();
+    // Update label filter options
+    const lf = document.getElementById('labelFilter');
+    if (lf && board.labels) {
+      const currentVal = lf.value;
+      lf.innerHTML = '<option value="">Alle Labels</option>';
+      for (const label of board.labels) {
+        const opt = document.createElement('option');
+        opt.value = label.name;
+        opt.textContent = label.name;
+        opt.style.color = label.color;
+        lf.appendChild(opt);
+      }
+      lf.value = currentVal;
+    }
     checkNewActivity();
   } catch (e) {
     showError(e.message);

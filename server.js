@@ -310,7 +310,7 @@ app.get('/board/:boardId', (req, res) => {
 // --- Boards ---
 app.get('/api/boards', authMiddleware, (req, res) => {
   if (req.user) {
-    res.json(db.getUserBoards(req.user.id));
+    res.json(db.getAllBoards());
   } else if (req.accessLink) {
     const board = db.getBoard(req.accessLink.board_id);
     res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
