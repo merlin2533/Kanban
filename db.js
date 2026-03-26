@@ -240,6 +240,18 @@ function getBoards() {
 
 // --- Columns ---
 
+// Lightweight helper: get the board_id for a given column id (used by server.js for SSE broadcasts)
+function getColumnBoardId(columnId) {
+  const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(columnId);
+  return col ? col.board_id : null;
+}
+
+// Lightweight helper: get the board_id for a given card id (used by server.js for SSE broadcasts)
+function getCardBoardId(cardId) {
+  const row = db.prepare('SELECT columns.board_id FROM cards JOIN columns ON cards.column_id = columns.id WHERE cards.id = ?').get(cardId);
+  return row ? row.board_id : null;
+}
+
 // Fix #5: Verify boardId exists before creating column
 function createColumn(boardId, title) {
   const board = db.prepare('SELECT id FROM boards WHERE id = ?').get(boardId);
@@ -639,5 +651,6 @@ module.exports = {
   getActivity,
   archiveCard, restoreCard, getArchivedCards,
   getComments, createComment, deleteComment,
-  exportBoard, importBoard
+  exportBoard, importBoard,
+  getColumnBoardId, getCardBoardId
 };

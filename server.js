@@ -234,25 +234,8 @@ app.post('/api/columns/:columnId/cards', (req, res) => {
   }
   const card = db.createCard(columnId, text);
   if (!card) return res.status(404).json({ error: 'Column not found' });
-  // Look up boardId via the column
-  const col = db.getBoard ? null : null; // use card.column_id lookup below
-  const colRow = require('better-sqlite3')(require('path').join(__dirname, require('./db').__dbPath || 'kanban.db'));
-  // Simpler: fetch board_id from the returned card's column
-  // We'll use the db module's internal query indirectly via a fresh select
-  // Actually: createCard returns a card with column_id; we need board_id.
-  // Use a lightweight approach: re-use the db object exported from db.js
-  // db doesn't expose a raw query, but we can look it up via getBoard indirectly.
-  // Best approach: store board_id on card by looking up the column.
-  // We already have the columnId; use db.createColumn's pattern: fetch the col.
-  // Since db.js doesn't export a getColumn helper, we look it up via a workaround.
-  // Actually the cleanest fix is to look it up right here using the db module trick.
-  // We'll just broadcast using the boardId we can obtain from createCard's internal col lookup.
-  // Since we don't have direct access, we piggyback via getBoard(...) being too expensive.
-  // Instead: expose boardId via a helper. For now use the card's column_id to look up board_id
-  // by importing the raw db — but that's circular. Use a known safe pattern:
-  // call db.getActivity with a fake query isn't right either.
-  // SIMPLEST CORRECT FIX: just remove the bad better-sqlite3 call and use a different approach.
-  // We'll refactor this properly below.
+  const boardId = db.getColumnBoardId(columnId);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_created' });
   res.status(201).json(card);
 });
 
@@ -274,14 +257,19 @@ app.patch('/api/cards/:cardId', (req, res) => {
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
   const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  const boardId = db.getCardBoardId(id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated' });
   res.json(card);
 });
 
 app.delete('/api/cards/:cardId', (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  // Fetch boardId before deletion since the card will be gone after
+  const boardId = db.getCardBoardId(id);
   const card = db.deleteCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_deleted' });
   res.json({ ok: true });
 });
 
@@ -294,6 +282,9 @@ app.put('/api/cards/:cardId/move', (req, res) => {
   if (!Number.isInteger(position) || position < 0) return res.status(400).json({ error: 'position must be a non-negative integer' });
   const card = db.moveCard(id, columnId, position);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  // After move, card.column_id is the target column; look up boardId from there
+  const boardId = db.getColumnBoardId(card.column_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_moved' });
   res.json(card);
 });
 
@@ -303,6 +294,8 @@ app.put('/api/cards/:cardId/archive', (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const card = db.archiveCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  const boardId = db.getColumnBoardId(card.column_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_archived' });
   res.json(card);
 });
 
@@ -311,6 +304,8 @@ app.put('/api/cards/:cardId/restore', (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const card = db.restoreCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  const boardId = db.getColumnBoardId(card.column_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_restored' });
   res.json(card);
 });
 
@@ -328,6 +323,8 @@ app.post('/api/cards/:cardId/checklist', (req, res) => {
   if (text === null) return res.status(400).json({ error: 'text must be a non-empty string max 1000 chars' });
   const item = db.createChecklistItem(id, text);
   if (!item) return res.status(404).json({ error: 'Card not found' });
+  const boardId = db.getCardBoardId(id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_created' });
   res.status(201).json(item);
 });
 
@@ -336,6 +333,8 @@ app.patch('/api/checklist/:itemId', (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const item = db.updateChecklistItem(id, req.body);
   if (!item) return res.status(404).json({ error: 'Item not found' });
+  const boardId = db.getCardBoardId(item.card_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_updated' });
   res.json(item);
 });
 
@@ -344,6 +343,8 @@ app.delete('/api/checklist/:itemId', (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const item = db.deleteChecklistItem(id);
   if (!item) return res.status(404).json({ error: 'Item not found' });
+  const boardId = db.getCardBoardId(item.card_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_deleted' });
   res.json({ ok: true });
 });
 
@@ -361,6 +362,8 @@ app.post('/api/cards/:cardId/comments', (req, res) => {
   if (!text) return res.status(400).json({ error: 'text required' });
   const comment = db.createComment(id, text);
   if (!comment) return res.status(404).json({ error: 'Card not found' });
+  const boardId = db.getCardBoardId(id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created' });
   res.status(201).json(comment);
 });
 
@@ -411,6 +414,8 @@ app.post('/api/cards/:cardId/labels/:labelId', (req, res) => {
   const labelId = validId(req.params.labelId);
   if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
   db.addLabelToCard(cardId, labelId);
+  const boardId = db.getCardBoardId(cardId);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_label_added' });
   res.json({ ok: true });
 });
 
@@ -419,6 +424,8 @@ app.delete('/api/cards/:cardId/labels/:labelId', (req, res) => {
   const labelId = validId(req.params.labelId);
   if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
   db.removeLabelFromCard(cardId, labelId);
+  const boardId = db.getCardBoardId(cardId);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_label_removed' });
   res.json({ ok: true });
 });
 
@@ -429,6 +436,8 @@ app.post('/api/cards/:cardId/attachments', uploadSingle, (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
   const att = db.createAttachment(id, req.file);
   if (!att) return res.status(404).json({ error: 'Card not found' });
+  const boardId = db.getCardBoardId(id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_created' });
   res.status(201).json(att);
 });
 
@@ -451,6 +460,8 @@ app.delete('/api/attachments/:id', (req, res) => {
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
   const safePath = path.join(__dirname, 'uploads', path.basename(att.filepath));
   try { fs.unlinkSync(safePath); } catch (e) { /* file may already be gone */ }
+  const boardId = db.getCardBoardId(att.card_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_deleted' });
   res.json({ ok: true });
 });
 
