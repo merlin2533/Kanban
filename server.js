@@ -112,6 +112,13 @@ function requireEdit(req, res, next) {
   return res.status(403).json({ error: 'Edit permission required' });
 }
 
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.is_admin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
 // --- Auth Routes ---
 app.post('/api/auth/login', (req, res) => {
   const { username, password } = req.body || {};
@@ -153,107 +160,49 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
 });
 
 // --- Admin ---
-app.get('/api/admin/users', authMiddleware, (req, res) => {
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.get('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   res.json(db.getUsers());
 });
 
-app.post('/api/admin/users', authMiddleware, (req, res) => {
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.post('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   const username = validString(req.body.username, 100);
   if (!username) return res.status(400).json({ error: 'username required' });
-  if (!req.body.password || req.body.password.length < 6) return res.status(400).json({ error: 'password min 6 chars' });
+  const password = req.body.password;
+  if (!password || password.length < 6) return res.status(400).json({ error: 'password must be at least 6 chars' });
   try {
-    const user = db.createUser(username, req.body.password, !!req.body.is_admin);
+    const user = db.createUser(username, password, req.body.is_admin || false);
     res.status(201).json(user);
-  } catch { res.status(409).json({ error: 'Username already exists' }); }
+  } catch (e) {
+    res.status(409).json({ error: 'Username already exists' });
+  }
 });
 
-app.delete('/api/admin/users/:id', authMiddleware, (req, res) => {
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (req.user.id === id) return res.status(400).json({ error: 'Cannot delete yourself' });
   const user = db.deleteUser(id);
-  if (!user) return res.status(404).json({ error: 'Not found' });
+  if (!user) return res.status(404).json({ error: 'User not found' });
   res.json({ ok: true });
 });
 
 // --- Board Access Links ---
-app.get('/api/boards/:boardId/access-links', authMiddleware, (req, res) => {
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
   res.json(db.getBoardAccessLinks(req.params.boardId));
 });
 
-app.post('/api/boards/:boardId/access-links', authMiddleware, (req, res) => {
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
   const permission = req.body.permission === 'edit' ? 'edit' : 'view';
   const label = validString(req.body.label, 200) || '';
   const link = db.createBoardAccessLink(req.params.boardId, permission, label);
   res.status(201).json(link);
 });
 
-app.delete('/api/access-links/:id', authMiddleware, (req, res) => {
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => {
   const link = db.deleteBoardAccessLink(req.params.id);
-  if (!link) return res.status(404).json({ error: 'Not found' });
+  if (!link) return res.status(404).json({ error: 'Link not found' });
   res.json({ ok: true });
 });
-
-
-// --- Cookie parsing ---
-function parseCookies(req) {
-  const cookies = {};
-  const header = req.headers.cookie;
-  if (!header) return cookies;
-  header.split(';').forEach(c => {
-    const [key, ...val] = c.trim().split('=');
-    cookies[key] = decodeURIComponent(val.join('='));
-  });
-  return cookies;
-}
-
-// --- Auth middleware ---
-function authMiddleware(req, res, next) {
-  // Check for access link token in query
-  const accessToken = req.query.token;
-  if (accessToken) {
-    const link = db.getBoardAccessLink(accessToken);
-    if (link) {
-      req.accessLink = link;
-      req.permission = link.permission;
-      return next();
-    }
-  }
-
-  // Check session cookie
-  const cookies = parseCookies(req);
-  const sessionId = cookies.kanban_session;
-  if (sessionId) {
-    const session = db.getSession(sessionId);
-    if (session) {
-      req.user = { id: session.user_id, username: session.username, is_admin: session.is_admin, password_changed_at: session.password_changed_at };
-      req.permission = 'admin';
-      return next();
-    }
-  }
-
-  return res.status(401).json({ error: 'Authentication required' });
-}
-
-function requireAdmin(req, res, next) {
-  if (!req.user || !req.user.is_admin) {
-    return res.status(403).json({ error: 'Admin access required' });
-  }
-  next();
-}
-
-function requireEdit(req, res, next) {
-  if (req.permission === 'admin' || req.permission === 'edit') {
-    return next();
-  }
-  return res.status(403).json({ error: 'Edit permission required' });
-}
 
 // --- SSE ---
 const sseClients = new Map(); // boardId -> Set of response objects
@@ -306,7 +255,7 @@ app.get('/board/:boardId', (req, res) => {
 // --- Boards ---
 app.get('/api/boards', authMiddleware, (req, res) => {
   if (req.user) {
-    res.json(db.getBoards());
+    res.json(db.getUserBoards(req.user.id));
   } else if (req.accessLink) {
     const board = db.getBoard(req.accessLink.board_id);
     res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
@@ -680,24 +629,6 @@ app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   const rawLimit = Number(req.query.limit) || 50;
   const limit = Math.min(rawLimit, 200);
   res.json(db.getActivity(id, limit));
-});
-
-// --- Board access links ---
-app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
-  res.json(db.getBoardAccessLinks(req.params.boardId));
-});
-
-app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
-  const permission = req.body.permission === 'edit' ? 'edit' : 'view';
-  const label = validString(req.body.label, 200) || '';
-  const link = db.createBoardAccessLink(req.params.boardId, permission, label);
-  res.status(201).json(link);
-});
-
-app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => {
-  const link = db.deleteBoardAccessLink(req.params.id);
-  if (!link) return res.status(404).json({ error: 'Link not found' });
-  res.json({ ok: true });
 });
 
 // --- Global error handler ---
