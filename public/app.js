@@ -87,6 +87,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadBoard();
   setupActivityPanel();
   setupModal();
+  setupBoardSwitcher();
 
   // SSE real-time sync
   const sseUrl = `/api/boards/${boardId}/events` + (window._accessToken ? `?token=${window._accessToken}` : '');
@@ -286,6 +287,16 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.header-actions').insertBefore(permBtn, document.getElementById('activityBtn'));
   }
 
+  // Members button (admin only)
+  if (currentUser && currentUser.is_admin) {
+    const membersBtn = document.createElement('button');
+    membersBtn.className = 'icon-btn';
+    membersBtn.innerHTML = '&#128101;'; // people icon
+    membersBtn.title = 'Mitglieder';
+    membersBtn.onclick = toggleMembersPanel;
+    document.querySelector('.header-actions').insertBefore(membersBtn, document.getElementById('activityBtn'));
+  }
+
   // Save as Template button (admin only)
   if (currentUser && currentUser.is_admin) {
     const templateBtn = document.createElement('button');
@@ -319,6 +330,8 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (archPanel && !archPanel.classList.contains('hidden')) { archPanel.classList.add('hidden'); e.preventDefault(); return; }
       const permPanel = document.getElementById('permissionsPanel');
       if (permPanel && !permPanel.classList.contains('hidden')) { permPanel.classList.add('hidden'); e.preventDefault(); return; }
+      const membersPanel = document.getElementById('membersPanel');
+      if (membersPanel && !membersPanel.classList.contains('hidden')) { membersPanel.classList.add('hidden'); e.preventDefault(); return; }
       return;
     }
 
@@ -1883,6 +1896,142 @@ async function createAccessLink() {
     await api(`/api/boards/${boardId}/access-links`, 'POST', { permission, label });
     document.getElementById('newLinkLabel').value = '';
     togglePermissionsPanel(); // refresh
+  } catch (e) { showError(e.message); }
+}
+
+// --- Board Switcher ---
+async function setupBoardSwitcher() {
+  try {
+    const boards = await api('/api/boards');
+    if (boards.length <= 1) return; // No need for switcher with only one board
+
+    const switcher = document.createElement('select');
+    switcher.className = 'board-switcher';
+    switcher.setAttribute('aria-label', 'Board wechseln');
+
+    for (const b of boards) {
+      const opt = document.createElement('option');
+      opt.value = b.id;
+      opt.textContent = b.title;
+      if (b.id === boardId) opt.selected = true;
+      switcher.appendChild(opt);
+    }
+
+    switcher.onchange = () => {
+      window.location.href = '/board/' + switcher.value;
+    };
+
+    // Insert after the home link, before boardTitle
+    const header = document.querySelector('header');
+    const boardTitle = document.getElementById('boardTitle');
+    header.insertBefore(switcher, boardTitle);
+  } catch {}
+}
+
+// --- Board Members Panel ---
+async function toggleMembersPanel() {
+  let panel = document.getElementById('membersPanel');
+  if (panel && !panel.classList.contains('hidden')) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'membersPanel';
+    panel.className = 'activity-panel';
+    panel.innerHTML = `
+      <div class="activity-header">
+        <h2>Board-Mitglieder</h2>
+        <button class="icon-btn" onclick="document.getElementById('membersPanel').classList.add('hidden')" aria-label="Schließen">&times;</button>
+      </div>
+      <div id="membersList" class="activity-list"></div>
+      <div style="padding:12px 20px;border-top:1px solid #e2e8f0;">
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="addMemberUser" style="flex:1;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            <option value="">Benutzer hinzufügen...</option>
+          </select>
+          <select id="addMemberRole" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            <option value="editor">Bearbeiter</option>
+            <option value="viewer">Betrachter</option>
+            <option value="admin">Board-Admin</option>
+          </select>
+          <button onclick="addBoardMember()" style="padding:6px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">+</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+  }
+
+  try {
+    const [members, allUsers] = await Promise.all([
+      api(`/api/boards/${boardId}/members`),
+      currentUser.is_admin ? api('/api/admin/users') : Promise.resolve([])
+    ]);
+
+    const list = document.getElementById('membersList');
+    list.innerHTML = '';
+
+    if (members.length === 0) {
+      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Keine Mitglieder (alle Admins haben Zugriff).</p>';
+    } else {
+      for (const m of members) {
+        const item = document.createElement('div');
+        item.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;';
+
+        const info = document.createElement('div');
+        const nameSpan = document.createElement('strong');
+        nameSpan.textContent = m.username;
+        const roleSpan = document.createElement('span');
+        roleSpan.style.cssText = 'font-size:12px;padding:2px 6px;border-radius:4px;background:#f1f5f9;color:#64748b;margin-left:8px;';
+        const roleLabels = { admin: 'Admin', editor: 'Bearbeiter', viewer: 'Betrachter' };
+        roleSpan.textContent = roleLabels[m.role] || m.role;
+        info.appendChild(nameSpan);
+        info.appendChild(roleSpan);
+
+        const del = document.createElement('button');
+        del.style.cssText = 'background:none;border:none;color:#94a3b8;cursor:pointer;font-size:16px;';
+        del.innerHTML = '&times;';
+        del.onclick = async () => {
+          try {
+            await api(`/api/boards/${boardId}/members/${m.id}`, 'DELETE');
+            toggleMembersPanel(); // refresh
+          } catch (e) { showError(e.message); }
+        };
+
+        item.appendChild(info);
+        item.appendChild(del);
+        list.appendChild(item);
+      }
+    }
+
+    // Populate add member dropdown
+    const memberIds = new Set(members.map(m => m.id));
+    const addSelect = document.getElementById('addMemberUser');
+    addSelect.innerHTML = '<option value="">Benutzer hinzufügen...</option>';
+    for (const u of allUsers) {
+      if (!memberIds.has(u.id)) {
+        const opt = document.createElement('option');
+        opt.value = u.id;
+        opt.textContent = u.username;
+        addSelect.appendChild(opt);
+      }
+    }
+
+    panel.classList.remove('hidden');
+  } catch (e) { showError(e.message); }
+}
+
+async function addBoardMember() {
+  const userSelect = document.getElementById('addMemberUser');
+  const roleSelect = document.getElementById('addMemberRole');
+  const userId = Number(userSelect.value);
+  if (!userId) return;
+  try {
+    await api(`/api/boards/${boardId}/members`, 'POST', { user_id: userId, role: roleSelect.value });
+    userSelect.value = '';
+    document.getElementById('membersPanel').classList.add('hidden');
+    toggleMembersPanel(); // refresh
   } catch (e) { showError(e.message); }
 }
 

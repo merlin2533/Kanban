@@ -1084,6 +1084,23 @@ main#board {
   cursor: default;
 }
 
+/* --- Board Switcher --- */
+.board-switcher {
+  padding: 4px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  font-size: 13px;
+  background: #fff;
+  cursor: pointer;
+  max-width: 200px;
+  outline: none;
+}
+
+.board-switcher:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid #2563eb;
+}
+
 /* --- Responsive --- */
 @media (max-width: 640px) {
   .column {
@@ -1150,4 +1167,5 @@ main#board {
   .priority-btn { background: #334155; border-color: #475569; }
   .assignee-tag { background: #334155; }
   .assignee-dot { border-color: #334155; }
+  .board-switcher { background: #334155; color: #e2e8f0; border-color: #475569; }
 }

@@ -997,7 +997,9 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getAllBoards, getUsers, deleteUser,
+  getAllBoards, getUserBoards, getUsers, deleteUser,
+  // Board members
+  addBoardMember, removeBoardMember, getBoardMembers, isUserBoardMember,
   // Webhooks
   createWebhook, getWebhooks, deleteWebhook, getActiveWebhooks,
   // Board Templates

@@ -129,9 +129,10 @@ function requireAdmin(req, res, next) {
 }
 
 function requireBoardAccess(req, boardId) {
-  // Admin users can access all boards
-  if (req.user) return true;
-  // Access link users can only access their linked board
+  if (req.user) {
+    if (req.user.is_admin) return true; // system admin
+    return db.isUserBoardMember(boardId, req.user.id);
+  }
   if (req.accessLink && req.accessLink.board_id === boardId) return true;
   return false;
 }
@@ -254,6 +255,34 @@ app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => 
   res.json({ ok: true });
 });
 
+// --- Board Members ---
+app.get('/api/boards/:boardId/members', authMiddleware, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
+  res.json(db.getBoardMembers(boardId));
+});
+
+app.post('/api/boards/:boardId/members', authMiddleware, requireEdit, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const userId = validId(req.body.user_id);
+  if (!userId) return res.status(400).json({ error: 'user_id required' });
+  const role = ['viewer', 'editor', 'admin'].includes(req.body.role) ? req.body.role : 'editor';
+  db.addBoardMember(boardId, userId, role);
+  broadcast(boardId, { type: 'update', action: 'member_added' });
+  res.json({ ok: true });
+});
+
+app.delete('/api/boards/:boardId/members/:userId', authMiddleware, requireEdit, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+  const userId = validId(req.params.userId);
+  if (!userId) return res.status(400).json({ error: 'Invalid ID' });
+  db.removeBoardMember(boardId, userId);
+  broadcast(boardId, { type: 'update', action: 'member_removed' });
+  res.json({ ok: true });
+});
+
 // --- SSE ---
 const sseClients = new Map(); // boardId -> Set of response objects
 const boardPresence = new Map(); // boardId -> Map(username -> { username, connectedAt })
@@ -340,7 +369,7 @@ app.get('/board/:boardId', (req, res) => {
 // --- Boards ---
 app.get('/api/boards', authMiddleware, (req, res) => {
   if (req.user) {
-    res.json(db.getAllBoards());
+    res.json(db.getUserBoards(req.user.id));
   } else if (req.accessLink) {
     const board = db.getBoard(req.accessLink.board_id);
     res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
@@ -356,6 +385,9 @@ app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
     if (title === null) return res.status(400).json({ error: 'title must be a non-empty string max 200 chars' });
   }
   const board = db.createBoard(title);
+  if (req.user) {
+    db.addBoardMember(board.id, req.user.id, 'admin');
+  }
   res.status(201).json(board);
 });
 
