@@ -101,6 +101,7 @@
         <button type="submit">Erstellen</button>
       </div>
     </form>
+    <div id="createError" style="display:none;color:#dc2626;font-size:13px;margin-top:8px;text-align:center;"></div>
     <div id="boardList" class="board-list"></div>
     <div class="import-section">
       <label for="importFile" class="import-label">
@@ -156,7 +157,7 @@
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
         body: JSON.stringify({ title })
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); alert(d.error || 'Board erstellen fehlgeschlagen'); return; }
+      if (!res.ok) { const d = await res.json().catch(() => ({})); const e=document.getElementById('createError'); e.textContent=d.error||'Board erstellen fehlgeschlagen'; e.style.display='block'; return; }
       const board = await res.json();
       window.location.href = '/board/' + board.id;
     });
