@@ -198,6 +198,17 @@ app.get('/api/auth/me', (req, res) => {
   res.json({ user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
 });
 
+// Returns 200 always – used by login page to avoid a red 401 in the console
+app.get('/api/auth/status', (req, res) => {
+  const cookies = parseCookies(req);
+  const sessionId = cookies.kanban_session;
+  if (!sessionId) return res.json({ authenticated: false });
+  const session = db.getSession(sessionId);
+  if (!session) return res.json({ authenticated: false });
+  const pwAge = session.password_changed_at ? (Date.now() - new Date(session.password_changed_at + 'Z').getTime()) / 86400000 : 999;
+  res.json({ authenticated: true, user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
+});
+
 app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Login required' });
   const { currentPassword, newPassword } = req.body || {};
