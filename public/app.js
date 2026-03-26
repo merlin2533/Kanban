@@ -94,6 +94,10 @@ document.addEventListener('DOMContentLoaded', async () => {
   let sseDebounceTimer = null;
   eventSource.onmessage = (e) => {
     const event = JSON.parse(e.data);
+    if (event.type === 'presence') {
+      renderPresence(event.users || []);
+      return;
+    }
     if (event.type === 'update') {
       clearTimeout(sseDebounceTimer);
       sseDebounceTimer = setTimeout(() => {
@@ -280,6 +284,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     permBtn.title = 'Berechtigungen';
     permBtn.onclick = togglePermissionsPanel;
     document.querySelector('.header-actions').insertBefore(permBtn, document.getElementById('activityBtn'));
+  }
+
+  // Save as Template button (admin only)
+  if (currentUser && currentUser.is_admin) {
+    const templateBtn = document.createElement('button');
+    templateBtn.className = 'icon-btn';
+    templateBtn.innerHTML = '&#128203;'; // clipboard icon
+    templateBtn.title = 'Als Vorlage speichern';
+    templateBtn.onclick = async () => {
+      const name = prompt('Vorlagen-Name:', board.title);
+      if (!name) return;
+      try {
+        await api(`/api/boards/${boardId}/save-template`, 'POST', { name });
+        showError('Vorlage gespeichert!');
+      } catch (e) { showError(e.message); }
+    };
+    document.querySelector('.header-actions').insertBefore(templateBtn, document.getElementById('activityBtn'));
   }
 
   // Keyboard shortcuts
@@ -733,7 +754,27 @@ function createCardEl(card) {
     hasMeta = true;
   }
 
+  if (card.assignees && card.assignees.length > 0) {
+    const assigneeSpan = document.createElement('span');
+    assigneeSpan.className = 'card-assignees';
+    for (const a of card.assignees) {
+      const dot = document.createElement('span');
+      dot.className = 'assignee-dot';
+      dot.textContent = a.username.charAt(0).toUpperCase();
+      dot.style.background = stringToColor(a.username);
+      dot.title = a.username;
+      assigneeSpan.appendChild(dot);
+    }
+    meta.appendChild(assigneeSpan);
+    hasMeta = true;
+  }
+
   if (hasMeta) div.appendChild(meta);
+
+  if (card.priority) {
+    const colors = { high: '#dc2626', medium: '#f59e0b', low: '#22c55e' };
+    div.style.borderLeft = `4px solid ${colors[card.priority] || 'transparent'}`;
+  }
 
   // Click to open modal
   div.onclick = (e) => {
@@ -744,6 +785,68 @@ function createCardEl(card) {
   // Drag events
   div.addEventListener('dragstart', handleDragStart);
   div.addEventListener('dragend', handleDragEnd);
+
+  // Touch drag support
+  let touchClone = null;
+  let touchSource = null;
+
+  div.addEventListener('touchstart', (e) => {
+    if (!canEdit()) return;
+    const touch = e.touches[0];
+    touchSource = div;
+
+    // Long press to start drag
+    div._touchTimer = setTimeout(() => {
+      div.classList.add('dragging');
+      touchClone = div.cloneNode(true);
+      touchClone.style.cssText = 'position:fixed;z-index:9999;pointer-events:none;opacity:0.8;width:' + div.offsetWidth + 'px;';
+      touchClone.style.left = touch.clientX - 20 + 'px';
+      touchClone.style.top = touch.clientY - 20 + 'px';
+      document.body.appendChild(touchClone);
+    }, 300);
+  }, { passive: true });
+
+  div.addEventListener('touchmove', (e) => {
+    if (!touchClone) {
+      clearTimeout(div._touchTimer);
+      return;
+    }
+    e.preventDefault();
+    const touch = e.touches[0];
+    touchClone.style.left = touch.clientX - 20 + 'px';
+    touchClone.style.top = touch.clientY - 20 + 'px';
+  }, { passive: false });
+
+  div.addEventListener('touchend', async (e) => {
+    clearTimeout(div._touchTimer);
+    if (!touchClone || !touchSource) return;
+
+    touchSource.classList.remove('dragging');
+    const touch = e.changedTouches[0];
+    document.body.removeChild(touchClone);
+    touchClone = null;
+
+    // Find target column under touch point
+    const elements = document.elementsFromPoint(touch.clientX, touch.clientY);
+    const targetContainer = elements.find(el => el.classList && el.classList.contains('cards-container'));
+    if (targetContainer && touchSource.dataset.cardId) {
+      const targetColumnId = Number(targetContainer.dataset.columnId);
+      const cards = [...targetContainer.querySelectorAll('.card')];
+      let position = cards.length;
+      for (let i = 0; i < cards.length; i++) {
+        const rect = cards[i].getBoundingClientRect();
+        if (touch.clientY < rect.top + rect.height / 2) {
+          position = i;
+          break;
+        }
+      }
+      try {
+        await api(`/api/cards/${touchSource.dataset.cardId}/move`, 'PUT', { columnId: targetColumnId, position });
+        loadBoard();
+      } catch (err) { showError(err.message); }
+    }
+    touchSource = null;
+  });
 
   return div;
 }
@@ -1421,6 +1524,25 @@ function renderAssignees(assignees) {
     };
     tag.appendChild(rm);
     container.appendChild(tag);
+  }
+}
+
+function renderPresence(users) {
+  let container = document.getElementById('presenceIndicator');
+  if (!container) {
+    container = document.createElement('div');
+    container.id = 'presenceIndicator';
+    container.className = 'presence-indicator';
+    document.querySelector('header').insertBefore(container, document.querySelector('.header-actions'));
+  }
+  container.innerHTML = '';
+  for (const u of users) {
+    const dot = document.createElement('span');
+    dot.className = 'presence-dot';
+    dot.textContent = u.username.charAt(0).toUpperCase();
+    dot.style.background = stringToColor(u.username);
+    dot.title = u.username + ' (online)';
+    container.appendChild(dot);
   }
 }
 

@@ -184,6 +184,50 @@
     }
     loadBoards();
 
+    async function loadTemplates() {
+      try {
+        const res = await fetch('/api/templates');
+        if (!res.ok) return;
+        const templates = await res.json();
+        if (templates.length === 0) return;
+        const list = document.getElementById('boardList');
+        const heading = document.createElement('h2');
+        heading.textContent = 'Vorlagen';
+        heading.style.cssText = 'font-size:18px;margin:24px 0 12px;text-align:left;';
+        list.appendChild(heading);
+        for (const t of templates) {
+          const cols = JSON.parse(t.columns_json);
+          const item = document.createElement('div');
+          item.className = 'board-list-item';
+          item.style.cursor = 'pointer';
+          const titleSpan = document.createElement('span');
+          titleSpan.className = 'board-list-title';
+          titleSpan.textContent = t.name + ' (' + cols.length + ' Spalten)';
+          const btn = document.createElement('button');
+          btn.textContent = 'Verwenden';
+          btn.style.cssText = 'padding:4px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;';
+          btn.onclick = async (e) => {
+            e.stopPropagation();
+            const title = prompt('Board-Name:', t.name);
+            if (!title) return;
+            const res = await fetch('/api/templates/' + t.id + '/create-board', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ title })
+            });
+            if (res.ok) {
+              const board = await res.json();
+              window.location.href = '/board/' + board.id;
+            }
+          };
+          item.appendChild(titleSpan);
+          item.appendChild(btn);
+          list.appendChild(item);
+        }
+      } catch {}
+    }
+    loadTemplates();
+
     // Import board
     document.getElementById('importFile').addEventListener('change', async (e) => {
       const file = e.target.files[0];
