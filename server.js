@@ -200,10 +200,65 @@ app.delete('/api/access-links/:id', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+
+// --- Cookie parsing ---
+function parseCookies(req) {
+  const cookies = {};
+  const header = req.headers.cookie;
+  if (!header) return cookies;
+  header.split(';').forEach(c => {
+    const [key, ...val] = c.trim().split('=');
+    cookies[key] = decodeURIComponent(val.join('='));
+  });
+  return cookies;
+}
+
+// --- Auth middleware ---
+function authMiddleware(req, res, next) {
+  // Check for access link token in query
+  const accessToken = req.query.token;
+  if (accessToken) {
+    const link = db.getBoardAccessLink(accessToken);
+    if (link) {
+      req.accessLink = link;
+      req.permission = link.permission;
+      return next();
+    }
+  }
+
+  // Check session cookie
+  const cookies = parseCookies(req);
+  const sessionId = cookies.kanban_session;
+  if (sessionId) {
+    const session = db.getSession(sessionId);
+    if (session) {
+      req.user = { id: session.user_id, username: session.username, is_admin: session.is_admin, password_changed_at: session.password_changed_at };
+      req.permission = 'admin';
+      return next();
+    }
+  }
+
+  return res.status(401).json({ error: 'Authentication required' });
+}
+
+function requireAdmin(req, res, next) {
+  if (!req.user || !req.user.is_admin) {
+    return res.status(403).json({ error: 'Admin access required' });
+  }
+  next();
+}
+
+function requireEdit(req, res, next) {
+  if (req.permission === 'admin' || req.permission === 'edit') {
+    return next();
+  }
+  return res.status(403).json({ error: 'Edit permission required' });
+}
+
 // --- SSE ---
 const sseClients = new Map(); // boardId -> Set of response objects
 
-app.get('/api/boards/:boardId/events', (req, res) => {
+app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
 
   res.writeHead(200, {
@@ -463,13 +518,13 @@ app.put('/api/cards/:cardId/restore', authMiddleware, requireEdit, (req, res) =>
 });
 
 // --- Checklist ---
-app.get('/api/cards/:cardId/checklist', (req, res) => {
+app.get('/api/cards/:cardId/checklist', authMiddleware, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   res.json(db.getChecklist(id));
 });
 
-app.post('/api/cards/:cardId/checklist', (req, res) => {
+app.post('/api/cards/:cardId/checklist', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const text = validString(req.body.text, 1000);
@@ -481,7 +536,7 @@ app.post('/api/cards/:cardId/checklist', (req, res) => {
   res.status(201).json(item);
 });
 
-app.patch('/api/checklist/:itemId', (req, res) => {
+app.patch('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.itemId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const item = db.updateChecklistItem(id, req.body);
@@ -491,7 +546,7 @@ app.patch('/api/checklist/:itemId', (req, res) => {
   res.json(item);
 });
 
-app.delete('/api/checklist/:itemId', (req, res) => {
+app.delete('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.itemId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const item = db.deleteChecklistItem(id);
@@ -502,13 +557,13 @@ app.delete('/api/checklist/:itemId', (req, res) => {
 });
 
 // --- Comments ---
-app.get('/api/cards/:cardId/comments', (req, res) => {
+app.get('/api/cards/:cardId/comments', authMiddleware, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   res.json(db.getComments(id));
 });
 
-app.post('/api/cards/:cardId/comments', (req, res) => {
+app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const text = validString(req.body.text, 5000);
@@ -520,7 +575,7 @@ app.post('/api/cards/:cardId/comments', (req, res) => {
   res.status(201).json(comment);
 });
 
-app.delete('/api/comments/:commentId', (req, res) => {
+app.delete('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.commentId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const comment = db.deleteComment(id);
@@ -529,12 +584,12 @@ app.delete('/api/comments/:commentId', (req, res) => {
 });
 
 // --- Labels ---
-app.get('/api/boards/:boardId/labels', (req, res) => {
+app.get('/api/boards/:boardId/labels', authMiddleware, (req, res) => {
   const boardId = req.params.boardId;
   res.json(db.getLabels(boardId));
 });
 
-app.post('/api/boards/:boardId/labels', (req, res) => {
+app.post('/api/boards/:boardId/labels', authMiddleware, requireEdit, (req, res) => {
   const boardId = req.params.boardId;
   const name = validString(req.body.name, 100);
   if (!name) return res.status(400).json({ error: 'name required, max 100 chars' });
@@ -544,7 +599,7 @@ app.post('/api/boards/:boardId/labels', (req, res) => {
   res.status(201).json(label);
 });
 
-app.patch('/api/labels/:labelId', (req, res) => {
+app.patch('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.labelId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const label = db.updateLabel(id, req.body);
@@ -553,7 +608,7 @@ app.patch('/api/labels/:labelId', (req, res) => {
   res.json(label);
 });
 
-app.delete('/api/labels/:labelId', (req, res) => {
+app.delete('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.labelId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const label = db.deleteLabel(id);
@@ -562,7 +617,7 @@ app.delete('/api/labels/:labelId', (req, res) => {
   res.json({ ok: true });
 });
 
-app.post('/api/cards/:cardId/labels/:labelId', (req, res) => {
+app.post('/api/cards/:cardId/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
   const cardId = validId(req.params.cardId);
   const labelId = validId(req.params.labelId);
   if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
@@ -572,7 +627,7 @@ app.post('/api/cards/:cardId/labels/:labelId', (req, res) => {
   res.json({ ok: true });
 });
 
-app.delete('/api/cards/:cardId/labels/:labelId', (req, res) => {
+app.delete('/api/cards/:cardId/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
   const cardId = validId(req.params.cardId);
   const labelId = validId(req.params.labelId);
   if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
@@ -583,7 +638,7 @@ app.delete('/api/cards/:cardId/labels/:labelId', (req, res) => {
 });
 
 // --- Attachments ---
-app.post('/api/cards/:cardId/attachments', uploadSingle, (req, res) => {
+app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, uploadSingle, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -594,7 +649,7 @@ app.post('/api/cards/:cardId/attachments', uploadSingle, (req, res) => {
   res.status(201).json(att);
 });
 
-app.get('/api/attachments/:id', (req, res) => {
+app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const att = db.getAttachment(id);
@@ -606,7 +661,7 @@ app.get('/api/attachments/:id', (req, res) => {
   });
 });
 
-app.delete('/api/attachments/:id', (req, res) => {
+app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const att = db.deleteAttachment(id);
@@ -619,12 +674,30 @@ app.delete('/api/attachments/:id', (req, res) => {
 });
 
 // --- Activity ---
-app.get('/api/boards/:boardId/activity', (req, res) => {
+app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const rawLimit = Number(req.query.limit) || 50;
   const limit = Math.min(rawLimit, 200);
   res.json(db.getActivity(id, limit));
+});
+
+// --- Board access links ---
+app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
+  res.json(db.getBoardAccessLinks(req.params.boardId));
+});
+
+app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
+  const permission = req.body.permission === 'edit' ? 'edit' : 'view';
+  const label = validString(req.body.label, 200) || '';
+  const link = db.createBoardAccessLink(req.params.boardId, permission, label);
+  res.status(201).json(link);
+});
+
+app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => {
+  const link = db.deleteBoardAccessLink(req.params.id);
+  if (!link) return res.status(404).json({ error: 'Link not found' });
+  res.json({ ok: true });
 });
 
 // --- Global error handler ---
