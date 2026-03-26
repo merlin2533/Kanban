@@ -7,6 +7,10 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="description" content="Einfaches selbst-gehostetes Kanban Board">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -47,7 +51,7 @@
       border: 2px solid #e2e8f0;
       border-radius: 10px;
       font-size: 16px;
-      outline: none;
+      outline: 2px solid transparent;
       transition: border-color 0.2s;
     }
     input:focus { border-color: #2563eb; }
@@ -68,6 +72,7 @@
       font-size: 48px;
       margin-bottom: 16px;
     }
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
   </style>
 </head>
 <body>
@@ -77,6 +82,7 @@
     <p>Erstelle ein neues Board und teile den Link mit deinem Team.</p>
     <form id="createForm">
       <div class="form-group">
+        <label for="title" class="sr-only">Board-Name</label>
         <input type="text" id="title" placeholder="Board-Name..." autofocus>
         <button type="submit">Erstellen</button>
       </div>
@@ -96,7 +102,7 @@
     });
 
     if ('serviceWorker' in navigator) {
-      navigator.serviceWorker.register('/sw.js');
+      navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW:', err));
     }
   </script>
 </body>

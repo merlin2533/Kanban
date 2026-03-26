@@ -3,6 +3,13 @@ let boardId = window.location.pathname.split('/board/')[1];
 let board = null;
 let currentCardId = null;
 
+// --- boardId guard ---
+if (!boardId) {
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('board').innerHTML = '<p style="padding:40px;color:#94a3b8;font-size:18px;">Ungültige Board-URL.</p>';
+  });
+} else {
+
 // --- Init ---
 document.addEventListener('DOMContentLoaded', () => {
   loadBoard();
@@ -24,20 +31,43 @@ async function api(url, method = 'GET', body = null) {
     opts.body = body;
   }
   const res = await fetch(url, opts);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(err.error || 'Request failed');
+  }
   return res.json();
 }
 
+// --- Error Toast ---
+function showError(msg) {
+  const toast = document.createElement('div');
+  toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+  toast.textContent = msg;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.remove(), 4000);
+}
+
 // --- Board ---
+let boardLoading = false;
+
 async function loadBoard() {
-  board = await api(`/api/boards/${boardId}`);
-  if (!board || board.error) {
-    document.getElementById('board').innerHTML = '<p style="padding:40px;color:#94a3b8;font-size:18px;">Board nicht gefunden.</p>';
-    return;
+  if (boardLoading) return;
+  boardLoading = true;
+  try {
+    board = await api(`/api/boards/${boardId}`);
+    if (!board || board.error) {
+      document.getElementById('board').innerHTML = '<p style="padding:40px;color:#94a3b8;font-size:18px;">Board nicht gefunden.</p>';
+      return;
+    }
+    document.getElementById('boardTitle').textContent = board.title;
+    document.title = board.title + ' - Kanban';
+    renderBoard();
+    checkNewActivity();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    boardLoading = false;
   }
-  document.getElementById('boardTitle').textContent = board.title;
-  document.title = board.title + ' - Kanban';
-  renderBoard();
-  checkNewActivity();
 }
 
 function renderBoard() {
@@ -55,8 +85,12 @@ function renderBoard() {
   addBtn.onclick = async () => {
     const title = prompt('Spaltenname:');
     if (!title) return;
-    await api(`/api/boards/${boardId}/columns`, 'POST', { title });
-    loadBoard();
+    try {
+      await api(`/api/boards/${boardId}/columns`, 'POST', { title });
+      loadBoard();
+    } catch (e) {
+      showError(e.message);
+    }
   };
   boardEl.appendChild(addBtn);
 }
@@ -77,10 +111,20 @@ function createColumnEl(col) {
   titleInput.readOnly = true;
   titleInput.onclick = () => { titleInput.readOnly = false; titleInput.focus(); };
   titleInput.onblur = async () => {
+    if (!titleInput.value.trim()) {
+      titleInput.value = col.title;
+      titleInput.readOnly = true;
+      return;
+    }
     titleInput.readOnly = true;
     if (titleInput.value !== col.title) {
-      await api(`/api/columns/${col.id}`, 'PATCH', { title: titleInput.value });
-      col.title = titleInput.value;
+      try {
+        await api(`/api/columns/${col.id}`, 'PATCH', { title: titleInput.value });
+        col.title = titleInput.value;
+      } catch (e) {
+        showError(e.message);
+        titleInput.value = col.title;
+      }
     }
   };
   titleInput.onkeydown = (e) => { if (e.key === 'Enter') titleInput.blur(); };
@@ -95,8 +139,12 @@ function createColumnEl(col) {
   deleteBtn.title = 'Spalte löschen';
   deleteBtn.onclick = async () => {
     if (!confirm(`Spalte "${col.title}" mit allen Karten löschen?`)) return;
-    await api(`/api/columns/${col.id}`, 'DELETE');
-    loadBoard();
+    try {
+      await api(`/api/columns/${col.id}`, 'DELETE');
+      loadBoard();
+    } catch (e) {
+      showError(e.message);
+    }
   };
 
   header.appendChild(titleInput);
@@ -124,9 +172,13 @@ function createColumnEl(col) {
   addInput.placeholder = '+ Karte hinzufügen...';
   addInput.onkeydown = async (e) => {
     if (e.key === 'Enter' && addInput.value.trim()) {
-      await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
-      addInput.value = '';
-      loadBoard();
+      try {
+        await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
+        addInput.value = '';
+        loadBoard();
+      } catch (e) {
+        showError(e.message);
+      }
     }
   };
   addCard.appendChild(addInput);
@@ -202,11 +254,9 @@ function createCardEl(card) {
 
 // --- Drag & Drop ---
 let draggedCardId = null;
-let draggedSourceColumnId = null;
 
 function handleDragStart(e) {
   draggedCardId = this.dataset.cardId;
-  draggedSourceColumnId = this.dataset.columnId;
   this.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
 }
@@ -215,6 +265,7 @@ function handleDragEnd(e) {
   this.classList.remove('dragging');
   document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
   document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+  draggedCardId = null;
 }
 
 function handleDragOver(e) {
@@ -259,19 +310,22 @@ async function handleDrop(e) {
 
   let position;
   if (afterEl) {
-    position = Number(afterEl.dataset.position);
+    position = cards.indexOf(afterEl);
   } else {
     position = cards.length;
   }
 
-  await api(`/api/cards/${draggedCardId}/move`, 'PUT', {
-    columnId: Number(targetColumnId),
-    position
-  });
-
-  draggedCardId = null;
-  draggedSourceColumnId = null;
-  loadBoard();
+  try {
+    await api(`/api/cards/${draggedCardId}/move`, 'PUT', {
+      columnId: Number(targetColumnId),
+      position
+    });
+    loadBoard();
+  } catch (e) {
+    showError(e.message);
+  } finally {
+    draggedCardId = null;
+  }
 }
 
 function getInsertionPoint(cards, y) {
@@ -296,7 +350,11 @@ function setupModal() {
     if (!currentCardId) return;
     const text = document.getElementById('modalCardText').value.trim();
     if (text) {
-      await api(`/api/cards/${currentCardId}`, 'PATCH', { text });
+      try {
+        await api(`/api/cards/${currentCardId}`, 'PATCH', { text });
+      } catch (e) {
+        showError(e.message);
+      }
     }
   };
   document.getElementById('modalCardText').onkeydown = (e) => {
@@ -307,9 +365,13 @@ function setupModal() {
   document.getElementById('deleteCardBtn').onclick = async () => {
     if (!currentCardId) return;
     if (!confirm('Karte löschen?')) return;
-    await api(`/api/cards/${currentCardId}`, 'DELETE');
-    closeModal();
-    loadBoard();
+    try {
+      await api(`/api/cards/${currentCardId}`, 'DELETE');
+      closeModal();
+      loadBoard();
+    } catch (e) {
+      showError(e.message);
+    }
   };
 
   // Checklist add
@@ -346,6 +408,8 @@ function openCardModal(card) {
 function closeModal() {
   document.getElementById('modalOverlay').classList.add('hidden');
   currentCardId = null;
+  document.getElementById('checklistInput').value = '';
+  document.getElementById('fileInput').value = '';
 }
 
 // --- Checklist ---
@@ -377,8 +441,12 @@ function renderChecklist(items) {
     cb.type = 'checkbox';
     cb.checked = item.checked;
     cb.onchange = async () => {
-      await api(`/api/checklist/${item.id}`, 'PATCH', { checked: cb.checked });
-      reloadModalChecklist();
+      try {
+        await api(`/api/checklist/${item.id}`, 'PATCH', { checked: cb.checked });
+        reloadModalChecklist();
+      } catch (e) {
+        showError(e.message);
+      }
     };
 
     const text = document.createElement('span');
@@ -389,8 +457,12 @@ function renderChecklist(items) {
     del.className = 'delete-item';
     del.innerHTML = '&times;';
     del.onclick = async () => {
-      await api(`/api/checklist/${item.id}`, 'DELETE');
-      reloadModalChecklist();
+      try {
+        await api(`/api/checklist/${item.id}`, 'DELETE');
+        reloadModalChecklist();
+      } catch (e) {
+        showError(e.message);
+      }
     };
 
     row.appendChild(cb);
@@ -404,16 +476,25 @@ async function addChecklistItem() {
   const input = document.getElementById('checklistInput');
   const text = input.value.trim();
   if (!text || !currentCardId) return;
-  await api(`/api/cards/${currentCardId}/checklist`, 'POST', { text });
-  input.value = '';
-  reloadModalChecklist();
+  input.value = ''; // clear immediately to prevent double submit
+  try {
+    await api(`/api/cards/${currentCardId}/checklist`, 'POST', { text });
+    reloadModalChecklist();
+  } catch (e) {
+    showError(e.message);
+    input.value = text; // restore on error
+  }
 }
 
 async function reloadModalChecklist() {
   if (!currentCardId) return;
-  const items = await api(`/api/cards/${currentCardId}/checklist`);
-  renderChecklist(items);
-  loadBoard(); // refresh card indicators
+  try {
+    const items = await api(`/api/cards/${currentCardId}/checklist`);
+    renderChecklist(items);
+    loadBoard(); // refresh card indicators
+  } catch (e) {
+    showError(e.message);
+  }
 }
 
 // --- Attachments ---
@@ -458,8 +539,12 @@ function renderAttachments(attachments) {
     del.className = 'attachment-delete';
     del.innerHTML = '&times;';
     del.onclick = async () => {
-      await api(`/api/attachments/${att.id}`, 'DELETE');
-      reloadModalAttachments();
+      try {
+        await api(`/api/attachments/${att.id}`, 'DELETE');
+        reloadModalAttachments();
+      } catch (e) {
+        showError(e.message);
+      }
     };
 
     item.appendChild(info);
@@ -475,22 +560,30 @@ async function uploadFiles() {
 
 async function uploadFilesFromList(files) {
   if (!currentCardId || !files.length) return;
-  for (const file of files) {
-    const form = new FormData();
-    form.append('file', file);
-    await api(`/api/cards/${currentCardId}/attachments`, 'POST', form);
+  try {
+    for (const file of files) {
+      const form = new FormData();
+      form.append('file', file);
+      await api(`/api/cards/${currentCardId}/attachments`, 'POST', form);
+    }
+    document.getElementById('fileInput').value = '';
+    reloadModalAttachments();
+  } catch (e) {
+    showError(e.message);
   }
-  document.getElementById('fileInput').value = '';
-  reloadModalAttachments();
 }
 
 async function reloadModalAttachments() {
   if (!currentCardId) return;
-  // Re-fetch full board to get updated attachments
-  board = await api(`/api/boards/${boardId}`);
-  const card = findCard(currentCardId);
-  if (card) renderAttachments(card.attachments || []);
-  renderBoard();
+  try {
+    // Re-fetch full board to get updated attachments, but don't re-render the board
+    // while the modal is open. The board will re-render when the modal closes via loadBoard().
+    board = await api(`/api/boards/${boardId}`);
+    const card = findCard(currentCardId);
+    if (card) renderAttachments(card.attachments || []);
+  } catch (e) {
+    showError(e.message);
+  }
 }
 
 function findCard(cardId) {
@@ -524,51 +617,64 @@ async function toggleActivity() {
     return;
   }
 
-  const activities = await api(`/api/boards/${boardId}/activity`);
-  const list = document.getElementById('activityList');
-  list.innerHTML = '';
+  try {
+    const activities = await api(`/api/boards/${boardId}/activity`);
+    const list = document.getElementById('activityList');
+    list.innerHTML = '';
 
-  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
-  localStorage.setItem('lastVisit_' + boardId, new Date().toISOString());
-  document.getElementById('activityBadge').classList.add('hidden');
+    const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+    localStorage.setItem('lastVisit_' + boardId, new Date().toISOString());
+    document.getElementById('activityBadge').classList.add('hidden');
 
-  if (activities.length === 0) {
-    list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
-  } else {
-    for (const act of activities) {
-      const item = document.createElement('div');
-      item.className = 'activity-item';
-      if (lastVisit && act.created_at > lastVisit) {
-        item.classList.add('new');
+    if (activities.length === 0) {
+      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
+    } else {
+      for (const act of activities) {
+        const item = document.createElement('div');
+        item.className = 'activity-item';
+        if (lastVisit && act.created_at > lastVisit) {
+          item.classList.add('new');
+        }
+
+        const details = JSON.parse(act.details || '{}');
+        const actionText = formatAction(act.action, details);
+
+        const actionDiv = document.createElement('div');
+        actionDiv.className = 'activity-action';
+        actionDiv.innerHTML = actionText; // actionText is already escaped via esc()
+        const timeDiv = document.createElement('div');
+        timeDiv.className = 'activity-time';
+        timeDiv.textContent = formatTime(act.created_at); // textContent, safe
+        item.appendChild(actionDiv);
+        item.appendChild(timeDiv);
+
+        list.appendChild(item);
       }
-
-      const details = JSON.parse(act.details || '{}');
-      const actionText = formatAction(act.action, details);
-
-      item.innerHTML = `
-        <div class="activity-action">${actionText}</div>
-        <div class="activity-time">${formatTime(act.created_at)}</div>
-      `;
-      list.appendChild(item);
     }
-  }
 
-  panel.classList.remove('hidden');
+    panel.classList.remove('hidden');
+  } catch (e) {
+    showError(e.message);
+  }
 }
 
 async function checkNewActivity() {
   const lastVisit = localStorage.getItem('lastVisit_' + boardId);
   if (!lastVisit) return;
 
-  const activities = await api(`/api/boards/${boardId}/activity`);
-  const newCount = activities.filter(a => a.created_at > lastVisit).length;
+  try {
+    const activities = await api(`/api/boards/${boardId}/activity`);
+    const newCount = activities.filter(a => a.created_at > lastVisit).length;
 
-  const badge = document.getElementById('activityBadge');
-  if (newCount > 0) {
-    badge.textContent = newCount;
-    badge.classList.remove('hidden');
-  } else {
-    badge.classList.add('hidden');
+    const badge = document.getElementById('activityBadge');
+    if (newCount > 0) {
+      badge.textContent = newCount;
+      badge.classList.remove('hidden');
+    } else {
+      badge.classList.add('hidden');
+    }
+  } catch (e) {
+    showError(e.message);
   }
 }
 
@@ -597,7 +703,7 @@ function esc(str) {
 }
 
 function formatTime(iso) {
-  const d = new Date(iso + 'Z');
+  const d = new Date(/Z$|[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z');
   const now = new Date();
   const diff = (now - d) / 1000;
   if (diff < 60) return 'gerade eben';
@@ -605,3 +711,5 @@ function formatTime(iso) {
   if (diff < 86400) return Math.floor(diff / 3600) + ' Std.';
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+} // end boardId guard

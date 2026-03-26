@@ -8,6 +8,10 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="description" content="Einfaches selbst-gehostetes Kanban Board">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
 </head>
 <body>
   <header>
@@ -16,19 +20,19 @@
     <div class="header-actions">
       <button id="activityBtn" class="icon-btn" title="Aktivität">
         <span class="bell-icon">&#128276;</span>
-        <span id="activityBadge" class="badge hidden">0</span>
+        <span id="activityBadge" class="badge hidden"></span>
       </button>
     </div>
   </header>
 
-  <main id="board"></main>
+  <main id="board" aria-label="Kanban Board"></main>
 
   <!-- Card Detail Modal -->
-  <div id="modalOverlay" class="modal-overlay hidden">
+  <div id="modalOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="modalCardText">
     <div class="modal">
       <div class="modal-header">
-        <input id="modalCardText" class="modal-title-input" type="text">
-        <button id="modalClose" class="icon-btn close-btn">&times;</button>
+        <input id="modalCardText" class="modal-title-input" type="text" aria-label="Kartentitel">
+        <button id="modalClose" class="icon-btn close-btn" aria-label="Schließen">&times;</button>
       </div>
       <div class="modal-body">
         <!-- Checklist -->
@@ -36,7 +40,7 @@
           <h3>Checkliste <span id="checklistProgress"></span></h3>
           <div id="checklistItems"></div>
           <div class="add-row">
-            <input id="checklistInput" type="text" placeholder="Neues Item...">
+            <input id="checklistInput" type="text" placeholder="Neues Item..." aria-label="Neues Checklist-Item">
             <button id="addChecklistBtn">+</button>
           </div>
         </section>
@@ -47,7 +51,7 @@
           <div id="attachmentsList"></div>
           <div class="upload-area" id="uploadArea">
             <input type="file" id="fileInput" multiple hidden>
-            <button id="uploadBtn">Datei hochladen</button>
+            <button id="uploadBtn" aria-label="Datei auswählen">Datei hochladen</button>
             <span class="upload-hint">oder hierher ziehen</span>
           </div>
         </section>
@@ -59,10 +63,10 @@
   </div>
 
   <!-- Activity Panel -->
-  <div id="activityPanel" class="activity-panel hidden">
+  <div id="activityPanel" class="activity-panel hidden" role="complementary" aria-label="Aktivitätsprotokoll">
     <div class="activity-header">
       <h2>Aktivität</h2>
-      <button id="closeActivity" class="icon-btn">&times;</button>
+      <button id="closeActivity" class="icon-btn" aria-label="Schließen">&times;</button>
     </div>
     <div id="activityList" class="activity-list"></div>
   </div>
