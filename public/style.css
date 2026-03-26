@@ -567,6 +567,196 @@ main#board {
   font-weight: 500;
 }
 
+/* --- Description --- */
+.modal-description {
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.modal-description:focus-visible {
+  border-color: #2563eb;
+  outline: 2px solid #2563eb;
+}
+
+/* --- Labels --- */
+.card-labels-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+
+.label-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #fff;
+  cursor: default;
+}
+
+.label-tag .remove-label {
+  background: none;
+  border: none;
+  color: rgba(255,255,255,0.7);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+}
+
+.label-tag .remove-label:hover {
+  color: #fff;
+}
+
+.card-label-dots {
+  display: flex;
+  gap: 3px;
+  margin-bottom: 4px;
+}
+
+.card-label-dot {
+  height: 6px;
+  border-radius: 3px;
+  min-width: 32px;
+}
+
+.add-label-btn {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.add-label-btn:hover {
+  background: #e2e8f0;
+}
+
+.label-picker {
+  position: relative;
+}
+
+.label-dropdown {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 10;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 8px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  min-width: 240px;
+  margin-top: 4px;
+}
+
+.board-labels-list {
+  max-height: 200px;
+  overflow-y: auto;
+}
+
+.board-label-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.1s;
+}
+
+.board-label-item:hover {
+  background: #f1f5f9;
+}
+
+.board-label-item .label-color-dot {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  flex-shrink: 0;
+}
+
+.board-label-item .label-name {
+  flex: 1;
+  font-size: 13px;
+}
+
+.board-label-item .label-check {
+  font-size: 14px;
+  color: #2563eb;
+}
+
+.board-label-item .delete-label-btn {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 14px;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.board-label-item:hover .delete-label-btn {
+  opacity: 1;
+}
+
+.board-label-item .delete-label-btn:hover {
+  color: #ef4444;
+}
+
+.new-label-row {
+  display: flex;
+  gap: 4px;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e2e8f0;
+}
+
+.new-label-row input[type="text"] {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  font-size: 13px;
+  outline: none;
+}
+
+.new-label-row input[type="text"]:focus {
+  border-color: #2563eb;
+}
+
+.new-label-row input[type="color"] {
+  width: 32px;
+  height: 32px;
+  padding: 2px;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.new-label-row button {
+  padding: 6px 10px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-weight: 700;
+}
+
 /* --- Responsive --- */
 @media (max-width: 640px) {
   .column {
@@ -612,4 +802,10 @@ main#board {
   .checklist-item .item-text { color: #e2e8f0; }
   .progress-bar { background: #334155; }
   .cards-container.drag-over { background: #334155; }
+  .modal-description { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .label-dropdown { background: #1e293b; border-color: #475569; }
+  .board-label-item:hover { background: #334155; }
+  .new-label-row { border-color: #475569; }
+  .new-label-row input[type="text"] { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .add-label-btn { background: #334155; border-color: #475569; color: #e2e8f0; }
 }

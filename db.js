@@ -27,6 +27,7 @@ db.exec(`
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     column_id INTEGER NOT NULL REFERENCES columns(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
+    description TEXT DEFAULT '',
     position INTEGER NOT NULL,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
@@ -58,12 +59,35 @@ db.exec(`
     created_at TEXT DEFAULT (datetime('now'))
   );
 
+  CREATE TABLE IF NOT EXISTS labels (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    color TEXT NOT NULL DEFAULT '#2563eb'
+  );
+
+  CREATE TABLE IF NOT EXISTS card_labels (
+    card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    label_id INTEGER NOT NULL REFERENCES labels(id) ON DELETE CASCADE,
+    PRIMARY KEY (card_id, label_id)
+  );
+
   CREATE INDEX IF NOT EXISTS idx_columns_board_id ON columns(board_id);
   CREATE INDEX IF NOT EXISTS idx_cards_column_id ON cards(column_id);
   CREATE INDEX IF NOT EXISTS idx_checklist_card_id ON checklist_items(card_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_card_id ON attachments(card_id);
   CREATE INDEX IF NOT EXISTS idx_activity_board_id ON activity_log(board_id);
+  CREATE INDEX IF NOT EXISTS idx_labels_board_id ON labels(board_id);
+  CREATE INDEX IF NOT EXISTS idx_card_labels_card_id ON card_labels(card_id);
+  CREATE INDEX IF NOT EXISTS idx_card_labels_label_id ON card_labels(label_id);
 `);
+
+// Migration: add description column if missing
+try {
+  db.prepare("SELECT description FROM cards LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE cards ADD COLUMN description TEXT DEFAULT ''");
+}
 
 // --- Helpers ---
 
@@ -111,6 +135,7 @@ function getBoard(id) {
 
   let allChecklist = [];
   let allAttachments = [];
+  let allCardLabels = [];
 
   if (cardIds.length > 0) {
     const cardPlaceholders = cardIds.map(() => '?').join(',');
@@ -119,6 +144,9 @@ function getBoard(id) {
     ).all(...cardIds);
     allAttachments = db.prepare(
       `SELECT * FROM attachments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at`
+    ).all(...cardIds);
+    allCardLabels = db.prepare(
+      `SELECT cl.card_id, l.* FROM card_labels cl JOIN labels l ON cl.label_id = l.id WHERE cl.card_id IN (${cardPlaceholders})`
     ).all(...cardIds);
   }
 
@@ -135,10 +163,17 @@ function getBoard(id) {
     attachmentsByCard.get(att.card_id).push(att);
   }
 
+  const labelsByCard = new Map();
+  for (const cl of allCardLabels) {
+    if (!labelsByCard.has(cl.card_id)) labelsByCard.set(cl.card_id, []);
+    labelsByCard.get(cl.card_id).push({ id: cl.id, name: cl.name, color: cl.color, board_id: cl.board_id });
+  }
+
   const cardsByColumn = new Map();
   for (const card of allCards) {
     card.checklist = checklistByCard.get(card.id) || [];
     card.attachments = attachmentsByCard.get(card.id) || [];
+    card.labels = labelsByCard.get(card.id) || [];
     if (!cardsByColumn.has(card.column_id)) cardsByColumn.set(card.column_id, []);
     cardsByColumn.get(card.column_id).push(card);
   }
@@ -148,6 +183,7 @@ function getBoard(id) {
   }
 
   board.columns = columns;
+  board.labels = db.prepare('SELECT * FROM labels WHERE board_id = ? ORDER BY name').all(id);
   return board;
 }
 
@@ -240,14 +276,19 @@ function createCard(columnId, text) {
   return card;
 }
 
-function updateCard(id, text) {
-  db.prepare("UPDATE cards SET text = ?, updated_at = datetime('now') WHERE id = ?").run(text, id);
+function updateCard(id, updates) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
-  if (card) {
-    const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
-    if (col) logActivity(col.board_id, 'card_updated', { cardId: id, text });
-  }
-  return card;
+  if (!card) return null;
+
+  const text = updates.text !== undefined ? updates.text : card.text;
+  const description = updates.description !== undefined ? updates.description : card.description;
+
+  db.prepare("UPDATE cards SET text = ?, description = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, id);
+
+  const updated = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
+  const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(updated.column_id);
+  if (col) logActivity(col.board_id, 'card_updated', { cardId: id, text });
+  return updated;
 }
 
 // Fix #6: deleteCard resequences sibling positions after delete
@@ -393,6 +434,48 @@ function deleteAttachment(id) {
   return att;
 }
 
+// --- Labels ---
+
+function getLabels(boardId) {
+  return db.prepare('SELECT * FROM labels WHERE board_id = ? ORDER BY name').all(boardId);
+}
+
+function createLabel(boardId, name, color) {
+  const result = db.prepare('INSERT INTO labels (board_id, name, color) VALUES (?, ?, ?)').run(boardId, name, color || '#2563eb');
+  return db.prepare('SELECT * FROM labels WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function updateLabel(id, updates) {
+  const label = db.prepare('SELECT * FROM labels WHERE id = ?').get(id);
+  if (!label) return null;
+  const name = updates.name !== undefined ? updates.name : label.name;
+  const color = updates.color !== undefined ? updates.color : label.color;
+  db.prepare('UPDATE labels SET name = ?, color = ? WHERE id = ?').run(name, color, id);
+  return db.prepare('SELECT * FROM labels WHERE id = ?').get(id);
+}
+
+function deleteLabel(id) {
+  const label = db.prepare('SELECT * FROM labels WHERE id = ?').get(id);
+  if (label) db.prepare('DELETE FROM labels WHERE id = ?').run(id);
+  return label;
+}
+
+function addLabelToCard(cardId, labelId) {
+  try {
+    db.prepare('INSERT OR IGNORE INTO card_labels (card_id, label_id) VALUES (?, ?)').run(cardId, labelId);
+    return true;
+  } catch { return false; }
+}
+
+function removeLabelFromCard(cardId, labelId) {
+  db.prepare('DELETE FROM card_labels WHERE card_id = ? AND label_id = ?').run(cardId, labelId);
+  return true;
+}
+
+function getCardLabels(cardId) {
+  return db.prepare('SELECT l.* FROM labels l JOIN card_labels cl ON l.id = cl.id WHERE cl.card_id = ? ORDER BY l.name').all(cardId);
+}
+
 // --- Activity ---
 
 // Fix #11: cap limit to max 500
@@ -407,5 +490,6 @@ module.exports = {
   createCard, updateCard, deleteCard, moveCard,
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   createAttachment, getAttachment, deleteAttachment,
+  getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
   getActivity
 };

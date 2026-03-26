@@ -177,9 +177,17 @@ app.post('/api/columns/:columnId/cards', (req, res) => {
 app.patch('/api/cards/:cardId', (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const text = validString(req.body.text, 1000);
-  if (text === null) return res.status(400).json({ error: 'text must be a non-empty string max 1000 chars' });
-  const card = db.updateCard(id, text);
+  const updates = {};
+  if (req.body.text !== undefined) {
+    const text = validString(req.body.text, 1000);
+    if (text === null) return res.status(400).json({ error: 'text must be a non-empty string max 1000 chars' });
+    updates.text = text;
+  }
+  if (req.body.description !== undefined) {
+    updates.description = typeof req.body.description === 'string' ? req.body.description.slice(0, 5000) : '';
+  }
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
+  const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   res.json(card);
 });
@@ -234,6 +242,53 @@ app.delete('/api/checklist/:itemId', (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const item = db.deleteChecklistItem(id);
   if (!item) return res.status(404).json({ error: 'Item not found' });
+  res.json({ ok: true });
+});
+
+// --- Labels ---
+app.get('/api/boards/:boardId/labels', (req, res) => {
+  const boardId = req.params.boardId;
+  res.json(db.getLabels(boardId));
+});
+
+app.post('/api/boards/:boardId/labels', (req, res) => {
+  const boardId = req.params.boardId;
+  const name = validString(req.body.name, 100);
+  if (!name) return res.status(400).json({ error: 'name required, max 100 chars' });
+  const color = req.body.color || '#2563eb';
+  const label = db.createLabel(boardId, name, color);
+  res.status(201).json(label);
+});
+
+app.patch('/api/labels/:labelId', (req, res) => {
+  const id = validId(req.params.labelId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const label = db.updateLabel(id, req.body);
+  if (!label) return res.status(404).json({ error: 'Label not found' });
+  res.json(label);
+});
+
+app.delete('/api/labels/:labelId', (req, res) => {
+  const id = validId(req.params.labelId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const label = db.deleteLabel(id);
+  if (!label) return res.status(404).json({ error: 'Label not found' });
+  res.json({ ok: true });
+});
+
+app.post('/api/cards/:cardId/labels/:labelId', (req, res) => {
+  const cardId = validId(req.params.cardId);
+  const labelId = validId(req.params.labelId);
+  if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
+  db.addLabelToCard(cardId, labelId);
+  res.json({ ok: true });
+});
+
+app.delete('/api/cards/:cardId/labels/:labelId', (req, res) => {
+  const cardId = validId(req.params.cardId);
+  const labelId = validId(req.params.labelId);
+  if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
+  db.removeLabelFromCard(cardId, labelId);
   res.json({ ok: true });
 });
 

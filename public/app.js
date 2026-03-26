@@ -11,14 +11,67 @@ if (!boardId) {
 } else {
 
 // --- Init ---
-document.addEventListener('DOMContentLoaded', () => {
-  loadBoard();
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadBoard();
   setupActivityPanel();
   setupModal();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js');
   }
+
+  // Board title inline edit
+  const boardTitleEl = document.getElementById('boardTitle');
+  boardTitleEl.contentEditable = true;
+  boardTitleEl.style.cursor = 'text';
+  boardTitleEl.addEventListener('blur', async () => {
+    const newTitle = boardTitleEl.textContent.trim();
+    if (newTitle && newTitle !== board.title) {
+      try {
+        await api(`/api/boards/${boardId}`, 'PATCH', { title: newTitle });
+        board.title = newTitle;
+        document.title = newTitle + ' - Kanban';
+      } catch (e) {
+        showError(e.message);
+        boardTitleEl.textContent = board.title;
+      }
+    } else if (!newTitle) {
+      boardTitleEl.textContent = board.title;
+    }
+  });
+  boardTitleEl.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); boardTitleEl.blur(); }
+  });
+
+  // Share/copy link button
+  const shareBtn = document.createElement('button');
+  shareBtn.className = 'icon-btn';
+  shareBtn.innerHTML = '&#128279;'; // link icon
+  shareBtn.title = 'Link kopieren';
+  shareBtn.onclick = () => {
+    navigator.clipboard.writeText(window.location.href).then(() => {
+      const orig = shareBtn.innerHTML;
+      shareBtn.innerHTML = '&#10003;'; // checkmark
+      setTimeout(() => { shareBtn.innerHTML = orig; }, 2000);
+    }).catch(() => showError('Link konnte nicht kopiert werden'));
+  };
+  document.querySelector('.header-actions').insertBefore(shareBtn, document.getElementById('activityBtn'));
+
+  // Board delete button
+  const deleteBoard = document.createElement('button');
+  deleteBoard.className = 'icon-btn';
+  deleteBoard.innerHTML = '&#128465;'; // trash icon
+  deleteBoard.title = 'Board löschen';
+  deleteBoard.onclick = async () => {
+    if (!confirm('Board komplett löschen? Das kann nicht rückgängig gemacht werden!')) return;
+    try {
+      await api(`/api/boards/${boardId}`, 'DELETE');
+      window.location.href = '/';
+    } catch (e) {
+      showError(e.message);
+    }
+  };
+  document.querySelector('.header-actions').appendChild(deleteBoard);
 });
 
 // --- API Helpers ---
@@ -77,6 +130,37 @@ function renderBoard() {
   for (const col of board.columns) {
     boardEl.appendChild(createColumnEl(col));
   }
+
+  // Column drop zones
+  boardEl.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer.types.includes('text/column')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  });
+
+  boardEl.addEventListener('drop', async (e) => {
+    const colId = e.dataTransfer.getData('text/column');
+    if (!colId) return;
+    e.preventDefault();
+
+    // Find target position based on drop location
+    const columns = [...boardEl.querySelectorAll('.column:not(.dragging)')];
+    let targetPos = columns.length;
+    for (let i = 0; i < columns.length; i++) {
+      const rect = columns[i].getBoundingClientRect();
+      if (e.clientX < rect.left + rect.width / 2) {
+        targetPos = i;
+        break;
+      }
+    }
+
+    try {
+      await api(`/api/columns/${colId}/move`, 'PUT', { position: targetPos });
+      loadBoard();
+    } catch (err) {
+      showError(err.message);
+    }
+  });
 
   // Add column button
   const addBtn = document.createElement('button');
@@ -151,6 +235,17 @@ function createColumnEl(col) {
   header.appendChild(count);
   header.appendChild(deleteBtn);
 
+  // Column drag & drop
+  header.draggable = true;
+  header.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/column', col.id.toString());
+    e.dataTransfer.effectAllowed = 'move';
+    div.classList.add('dragging');
+  });
+  header.addEventListener('dragend', () => {
+    div.classList.remove('dragging');
+  });
+
   // Cards container
   const cardsContainer = document.createElement('div');
   cardsContainer.className = 'cards-container';
@@ -197,6 +292,20 @@ function createCardEl(card) {
   div.dataset.cardId = card.id;
   div.dataset.columnId = card.column_id;
   div.dataset.position = card.position;
+
+  // Label dots
+  if (card.labels && card.labels.length > 0) {
+    const dots = document.createElement('div');
+    dots.className = 'card-label-dots';
+    for (const label of card.labels) {
+      const dot = document.createElement('div');
+      dot.className = 'card-label-dot';
+      dot.style.background = label.color;
+      dot.title = label.name;
+      dots.appendChild(dot);
+    }
+    div.appendChild(dots);
+  }
 
   // Thumbnail if image attachment exists
   if (card.attachments && card.attachments.length > 0) {
@@ -259,6 +368,7 @@ function handleDragStart(e) {
   draggedCardId = this.dataset.cardId;
   this.classList.add('dragging');
   e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/card', this.dataset.cardId);
 }
 
 function handleDragEnd(e) {
@@ -301,6 +411,9 @@ async function handleDrop(e) {
   e.preventDefault();
   this.classList.remove('drag-over');
   document.querySelectorAll('.drop-indicator').forEach(el => el.remove());
+
+  // Ignore column drags
+  if (e.dataTransfer.types.includes('text/column')) return;
 
   if (!draggedCardId) return;
 
@@ -361,6 +474,20 @@ function setupModal() {
     if (e.key === 'Enter') e.target.blur();
   };
 
+  // Description
+  const descArea = document.getElementById('modalDescription');
+  if (descArea) {
+    descArea.onblur = async () => {
+      if (!currentCardId) return;
+      const desc = descArea.value;
+      try {
+        await api(`/api/cards/${currentCardId}`, 'PATCH', { description: desc });
+      } catch (e) {
+        showError(e.message);
+      }
+    };
+  }
+
   // Delete card
   document.getElementById('deleteCardBtn').onclick = async () => {
     if (!currentCardId) return;
@@ -373,6 +500,20 @@ function setupModal() {
       showError(e.message);
     }
   };
+
+  // Labels
+  const addLabelBtn = document.getElementById('addLabelBtn');
+  const labelDropdown = document.getElementById('labelDropdown');
+  if (addLabelBtn && labelDropdown) {
+    addLabelBtn.onclick = () => {
+      labelDropdown.classList.toggle('hidden');
+      if (!labelDropdown.classList.contains('hidden')) renderLabelPicker();
+    };
+    document.getElementById('createLabelBtn').onclick = createNewLabel;
+    document.getElementById('newLabelName').onkeydown = (e) => {
+      if (e.key === 'Enter') createNewLabel();
+    };
+  }
 
   // Checklist add
   document.getElementById('addChecklistBtn').onclick = addChecklistItem;
@@ -400,8 +541,11 @@ function setupModal() {
 function openCardModal(card) {
   currentCardId = card.id;
   document.getElementById('modalCardText').value = card.text;
+  const descArea = document.getElementById('modalDescription');
+  if (descArea) descArea.value = card.description || '';
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
+  renderCardLabels(card.labels || []);
   document.getElementById('modalOverlay').classList.remove('hidden');
 }
 
@@ -410,6 +554,112 @@ function closeModal() {
   currentCardId = null;
   document.getElementById('checklistInput').value = '';
   document.getElementById('fileInput').value = '';
+  const dd = document.getElementById('labelDropdown');
+  if (dd) dd.classList.add('hidden');
+}
+
+// --- Labels ---
+function renderCardLabels(labels) {
+  const container = document.getElementById('cardLabels');
+  if (!container) return;
+  container.innerHTML = '';
+  for (const label of labels) {
+    const tag = document.createElement('span');
+    tag.className = 'label-tag';
+    tag.style.background = label.color;
+    tag.textContent = label.name;
+    const rm = document.createElement('button');
+    rm.className = 'remove-label';
+    rm.innerHTML = '&times;';
+    rm.onclick = async () => {
+      try {
+        await api(`/api/cards/${currentCardId}/labels/${label.id}`, 'DELETE');
+        reloadCardLabels();
+      } catch (e) { showError(e.message); }
+    };
+    tag.appendChild(rm);
+    container.appendChild(tag);
+  }
+}
+
+function renderLabelPicker() {
+  const list = document.getElementById('boardLabelsList');
+  if (!list || !board) return;
+  list.innerHTML = '';
+  const cardLabels = findCard(currentCardId)?.labels || [];
+  const cardLabelIds = new Set(cardLabels.map(l => l.id));
+
+  for (const label of (board.labels || [])) {
+    const item = document.createElement('div');
+    item.className = 'board-label-item';
+
+    const dot = document.createElement('div');
+    dot.className = 'label-color-dot';
+    dot.style.background = label.color;
+
+    const name = document.createElement('span');
+    name.className = 'label-name';
+    name.textContent = label.name;
+
+    const check = document.createElement('span');
+    check.className = 'label-check';
+    check.textContent = cardLabelIds.has(label.id) ? '\u2713' : '';
+
+    const del = document.createElement('button');
+    del.className = 'delete-label-btn';
+    del.innerHTML = '&times;';
+    del.onclick = async (e) => {
+      e.stopPropagation();
+      if (!confirm(`Label "${label.name}" löschen?`)) return;
+      try {
+        await api(`/api/labels/${label.id}`, 'DELETE');
+        board.labels = board.labels.filter(l => l.id !== label.id);
+        renderLabelPicker();
+        reloadCardLabels();
+      } catch (err) { showError(err.message); }
+    };
+
+    item.onclick = async () => {
+      try {
+        if (cardLabelIds.has(label.id)) {
+          await api(`/api/cards/${currentCardId}/labels/${label.id}`, 'DELETE');
+        } else {
+          await api(`/api/cards/${currentCardId}/labels/${label.id}`, 'POST');
+        }
+        reloadCardLabels();
+        renderLabelPicker();
+      } catch (e) { showError(e.message); }
+    };
+
+    item.appendChild(dot);
+    item.appendChild(name);
+    item.appendChild(check);
+    item.appendChild(del);
+    list.appendChild(item);
+  }
+}
+
+async function createNewLabel() {
+  const nameInput = document.getElementById('newLabelName');
+  const colorInput = document.getElementById('newLabelColor');
+  const name = nameInput.value.trim();
+  if (!name || !board) return;
+  nameInput.value = '';
+  try {
+    const label = await api(`/api/boards/${boardId}/labels`, 'POST', { name, color: colorInput.value });
+    board.labels.push(label);
+    renderLabelPicker();
+  } catch (e) {
+    showError(e.message);
+    nameInput.value = name;
+  }
+}
+
+async function reloadCardLabels() {
+  if (!currentCardId) return;
+  board = await api(`/api/boards/${boardId}`);
+  const card = findCard(currentCardId);
+  if (card) renderCardLabels(card.labels || []);
 }
 
 // --- Checklist ---
