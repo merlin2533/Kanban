@@ -34,10 +34,10 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
 
-  // API calls & uploads: always network
+  // API calls & uploads: always network with credentials
   if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/uploads/')) {
     e.respondWith(
-      fetch(e.request).catch(() =>
+      fetch(new Request(e.request, { credentials: 'include' })).catch(() =>
         new Response(JSON.stringify({ error: 'offline' }), {
           status: 503,
           headers: { 'Content-Type': 'application/json' }

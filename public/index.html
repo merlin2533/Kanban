@@ -135,9 +135,13 @@
             }
           }
         } else {
+          sessionStorage.setItem('authRedirect', '1');
           window.location.href = '/login.html';
         }
-      } catch { window.location.href = '/login.html'; }
+      } catch {
+        sessionStorage.setItem('authRedirect', '1');
+        window.location.href = '/login.html';
+      }
     }
     checkAuth().then(() => {
       loadBoards();
