@@ -40,26 +40,33 @@ async function checkAuth() {
   const token = params.get('token');
 
   try {
-    const url = token ? `/api/auth/me?token=${token}` : '/api/auth/me';
-    const res = await fetch(url);
-    if (res.ok) {
-      const data = await res.json();
-      currentUser = data.user;
-      currentPermission = 'admin';
-    } else if (token) {
-      // Validate access token via a board API call
-      const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
-      if (boardRes.ok) {
-        currentPermission = 'view'; // will be set properly by server
-        // Store token for subsequent requests
-        window._accessToken = token;
+    if (token) {
+      // Try session auth first, fall back to access token
+      const res = await fetch(`/api/auth/me?token=${token}`);
+      if (res.ok) {
+        const data = await res.json();
+        currentUser = data.user;
+        currentPermission = 'admin';
+      } else {
+        // Validate access token via a board API call
+        const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
+        if (boardRes.ok) {
+          currentPermission = 'view';
+          window._accessToken = token;
+        } else {
+          window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+          return false;
+        }
+      }
+    } else {
+      const data = await fetch('/api/auth/status').then(r => r.json());
+      if (data.authenticated) {
+        currentUser = data.user;
+        currentPermission = 'admin';
       } else {
         window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
         return false;
       }
-    } else {
-      window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
-      return false;
     }
   } catch {
     window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);

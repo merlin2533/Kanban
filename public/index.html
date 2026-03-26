@@ -115,9 +115,8 @@
     let currentUser = null;
     async function checkAuth() {
       try {
-        const res = await fetch('/api/auth/me');
-        if (res.ok) {
-          const data = await res.json();
+        const data = await fetch('/api/auth/status').then(r => r.json());
+        if (data.authenticated) {
           currentUser = data.user;
           // Show settings link and logout
           const nav = document.createElement('div');
@@ -136,11 +135,9 @@
             }
           }
         } else {
-          sessionStorage.setItem('authRedirect', '1');
           window.location.href = '/login.html';
         }
       } catch {
-        sessionStorage.setItem('authRedirect', '1');
         window.location.href = '/login.html';
       }
     }

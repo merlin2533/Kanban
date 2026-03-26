@@ -69,9 +69,8 @@
 
     async function init() {
       try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) { window.location.href = '/login.html'; return; }
-        const data = await res.json();
+        const data = await fetch('/api/auth/status').then(r => r.json());
+        if (!data.authenticated) { window.location.href = '/login.html'; return; }
         currentUser = data.user;
 
         // Password age
