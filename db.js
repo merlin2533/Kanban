@@ -142,6 +142,15 @@ db.exec(`
     columns_json TEXT NOT NULL,
     created_at TEXT DEFAULT (datetime('now'))
   );
+
+  CREATE TABLE IF NOT EXISTS board_members (
+    board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    role TEXT NOT NULL DEFAULT 'editor',
+    PRIMARY KEY (board_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
+  CREATE INDEX IF NOT EXISTS idx_board_members_board_id ON board_members(board_id);
 `);
 
 // Migration: add description column if missing
@@ -264,6 +273,42 @@ function deleteBoardAccessLink(id) {
 
 function getAllBoards() {
   return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
+}
+
+function getUserBoards(userId) {
+  const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
+  if (user && user.is_admin) {
+    // System admins see all boards
+    return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
+  }
+  // Regular users see only boards they're a member of
+  return db.prepare(`
+    SELECT b.id, b.title, b.created_at FROM boards b
+    JOIN board_members bm ON b.id = bm.board_id
+    WHERE bm.user_id = ?
+    ORDER BY b.created_at DESC
+  `).all(userId);
+}
+
+function addBoardMember(boardId, userId, role) {
+  db.prepare('INSERT OR REPLACE INTO board_members (board_id, user_id, role) VALUES (?, ?, ?)').run(boardId, userId, role || 'editor');
+}
+
+function removeBoardMember(boardId, userId) {
+  db.prepare('DELETE FROM board_members WHERE board_id = ? AND user_id = ?').run(boardId, userId);
+}
+
+function getBoardMembers(boardId) {
+  return db.prepare(`
+    SELECT u.id, u.username, u.is_admin as is_system_admin, bm.role
+    FROM users u JOIN board_members bm ON u.id = bm.user_id
+    WHERE bm.board_id = ?
+    ORDER BY bm.role, u.username
+  `).all(boardId);
+}
+
+function isUserBoardMember(boardId, userId) {
+  return !!db.prepare('SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ?').get(boardId, userId);
 }
 
 function getUsers() {
