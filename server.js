@@ -129,10 +129,11 @@ function requireAdmin(req, res, next) {
 }
 
 function requireBoardAccess(req, boardId) {
-  if (req.user) {
-    if (req.user.is_admin) return true; // system admin
-    return db.isUserBoardMember(boardId, req.user.id);
-  }
+  // Admin users can access all boards
+  if (req.user && req.user.is_admin) return true;
+  // Regular users must be board members
+  if (req.user) return db.isBoardMember(boardId, req.user.id);
+  // Access link users can only access their linked board
   if (req.accessLink && req.accessLink.board_id === boardId) return true;
   return false;
 }
@@ -255,31 +256,22 @@ app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => 
   res.json({ ok: true });
 });
 
-// --- Board Members ---
-app.get('/api/boards/:boardId/members', authMiddleware, (req, res) => {
-  const boardId = req.params.boardId;
-  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
-  res.json(db.getBoardMembers(boardId));
+// --- Board Member Management (admin only) ---
+app.get('/api/boards/:boardId/members', authMiddleware, requireAdmin, (req, res) => {
+  res.json(db.getBoardMembers(req.params.boardId));
 });
 
-app.post('/api/boards/:boardId/members', authMiddleware, requireEdit, (req, res) => {
-  const boardId = req.params.boardId;
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.post('/api/boards/:boardId/members', authMiddleware, requireAdmin, (req, res) => {
   const userId = validId(req.body.user_id);
   if (!userId) return res.status(400).json({ error: 'user_id required' });
-  const role = ['viewer', 'editor', 'admin'].includes(req.body.role) ? req.body.role : 'editor';
-  db.addBoardMember(boardId, userId, role);
-  broadcast(boardId, { type: 'update', action: 'member_added' });
-  res.json({ ok: true });
+  db.addBoardMember(req.params.boardId, userId);
+  res.status(201).json({ ok: true });
 });
 
-app.delete('/api/boards/:boardId/members/:userId', authMiddleware, requireEdit, (req, res) => {
-  const boardId = req.params.boardId;
-  if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
+app.delete('/api/boards/:boardId/members/:userId', authMiddleware, requireAdmin, (req, res) => {
   const userId = validId(req.params.userId);
-  if (!userId) return res.status(400).json({ error: 'Invalid ID' });
-  db.removeBoardMember(boardId, userId);
-  broadcast(boardId, { type: 'update', action: 'member_removed' });
+  if (!userId) return res.status(400).json({ error: 'Invalid user ID' });
+  db.removeBoardMember(req.params.boardId, userId);
   res.json({ ok: true });
 });
 
@@ -369,7 +361,8 @@ app.get('/board/:boardId', (req, res) => {
 // --- Boards ---
 app.get('/api/boards', authMiddleware, (req, res) => {
   if (req.user) {
-    res.json(db.getUserBoards(req.user.id));
+    const boards = req.user.is_admin ? db.getAllBoards() : db.getBoardsForUser(req.user.id);
+    res.json(boards);
   } else if (req.accessLink) {
     const board = db.getBoard(req.accessLink.board_id);
     res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
@@ -384,10 +377,9 @@ app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
     title = validString(title, 200);
     if (title === null) return res.status(400).json({ error: 'title must be a non-empty string max 200 chars' });
   }
-  const board = db.createBoard(title);
-  if (req.user) {
-    db.addBoardMember(board.id, req.user.id, 'admin');
-  }
+  const creatorUserId = req.user ? req.user.id : null;
+  const board = db.createBoard(title, creatorUserId);
+  // If non-admin users exist, add them as members too (admin creates board for team)
   res.status(201).json(board);
 });
 

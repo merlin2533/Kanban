@@ -54,6 +54,13 @@
         <button type="submit" class="btn-primary" style="padding:8px 16px;">Erstellen</button>
       </form>
     </div>
+
+    <!-- Admin: Board Access Control -->
+    <div class="settings-card" id="boardAccessSection" style="display:none;">
+      <h2>Board-Zugriff</h2>
+      <p style="color:#64748b;font-size:13px;margin-bottom:16px;">Verwalte, welche Benutzer auf welche Boards zugreifen können. Admins haben immer Zugriff auf alle Boards.</p>
+      <div id="boardAccessList"></div>
+    </div>
   </div>
 
   <script>
@@ -78,7 +85,9 @@
         // Admin section
         if (currentUser.is_admin) {
           document.getElementById('adminSection').style.display = '';
+          document.getElementById('boardAccessSection').style.display = '';
           loadUsers();
+          loadBoardAccess();
         }
       } catch { window.location.href = '/login.html'; }
     }
@@ -105,6 +114,96 @@
           div.appendChild(del);
         }
         list.appendChild(div);
+      }
+    }
+
+    async function loadBoardAccess() {
+      const [boardsRes, usersRes] = await Promise.all([
+        fetch('/api/boards'),
+        fetch('/api/admin/users')
+      ]);
+      const boards = await boardsRes.json();
+      const allUsers = await usersRes.json();
+      const nonAdminUsers = allUsers.filter(u => !u.is_admin);
+
+      const container = document.getElementById('boardAccessList');
+      container.innerHTML = '';
+
+      if (boards.length === 0) {
+        container.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Keine Boards vorhanden.</p>';
+        return;
+      }
+
+      for (const board of boards) {
+        const boardDiv = document.createElement('div');
+        boardDiv.className = 'board-access-item';
+        boardDiv.dataset.boardId = board.id;
+
+        const header = document.createElement('div');
+        header.className = 'board-access-header';
+        header.innerHTML = '<strong>' + board.title + '</strong>';
+        boardDiv.appendChild(header);
+
+        const membersDiv = document.createElement('div');
+        membersDiv.className = 'board-access-members';
+        membersDiv.id = 'members-' + board.id;
+        boardDiv.appendChild(membersDiv);
+
+        if (nonAdminUsers.length > 0) {
+          const addRow = document.createElement('div');
+          addRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
+          const sel = document.createElement('select');
+          sel.className = 'board-sort';
+          sel.style.flex = '1';
+          sel.innerHTML = '<option value="">+ Benutzer hinzufügen...</option>';
+          for (const u of nonAdminUsers) {
+            const opt = document.createElement('option');
+            opt.value = u.id;
+            opt.textContent = u.username;
+            sel.appendChild(opt);
+          }
+          const addBtn = document.createElement('button');
+          addBtn.className = 'btn-primary';
+          addBtn.style.cssText = 'padding:6px 14px;font-size:13px;';
+          addBtn.textContent = 'Hinzufügen';
+          addBtn.onclick = async () => {
+            if (!sel.value) return;
+            await fetch('/api/boards/' + board.id + '/members', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ user_id: parseInt(sel.value) })
+            });
+            sel.value = '';
+            renderMembers(board.id, membersDiv, nonAdminUsers);
+          };
+          addRow.appendChild(sel);
+          addRow.appendChild(addBtn);
+          boardDiv.appendChild(addRow);
+        }
+
+        container.appendChild(boardDiv);
+        renderMembers(board.id, membersDiv, nonAdminUsers);
+      }
+    }
+
+    async function renderMembers(boardId, container, allNonAdmins) {
+      const res = await fetch('/api/boards/' + boardId + '/members');
+      const members = await res.json();
+      const nonAdminMembers = members.filter(m => !m.is_admin);
+      container.innerHTML = '';
+      if (nonAdminMembers.length === 0) {
+        container.innerHTML = '<span style="font-size:12px;color:#94a3b8;">Nur Admins</span>';
+        return;
+      }
+      for (const member of nonAdminMembers) {
+        const tag = document.createElement('span');
+        tag.className = 'member-tag';
+        tag.innerHTML = member.username + ' <button class="member-remove" data-uid="' + member.id + '" title="Entfernen">&times;</button>';
+        tag.querySelector('.member-remove').onclick = async () => {
+          await fetch('/api/boards/' + boardId + '/members/' + member.id, { method: 'DELETE' });
+          renderMembers(boardId, container, allNonAdmins);
+        };
+        container.appendChild(tag);
       }
     }
 
@@ -167,12 +266,43 @@
     .form-group input { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; }
     .btn-primary { padding: 10px 20px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
     .btn-primary:hover { background: #1d4ed8; }
+    .board-access-item {
+      border: 1px solid #e2e8f0;
+      border-radius: 8px;
+      padding: 12px 14px;
+      margin-bottom: 12px;
+    }
+    .board-access-header { margin-bottom: 8px; font-size: 14px; }
+    .board-access-members { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
+    .member-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      background: #eff6ff;
+      color: #1d4ed8;
+      border: 1px solid #bfdbfe;
+      border-radius: 20px;
+      padding: 2px 10px;
+      font-size: 12px;
+    }
+    .member-remove {
+      background: none;
+      border: none;
+      color: #64748b;
+      cursor: pointer;
+      padding: 0 2px;
+      font-size: 14px;
+      line-height: 1;
+    }
+    .member-remove:hover { color: #dc2626; }
     @media (prefers-color-scheme: dark) {
       .settings-card { background: #1e293b; }
       .settings-card h2 { color: #e2e8f0; }
       .form-group label { color: #94a3b8; }
       .form-group input { background: #334155; color: #e2e8f0; border-color: #475569; }
       .form-group input:focus { border-color: #2563eb; outline: 1px solid #2563eb; }
+      .board-access-item { border-color: #334155; }
+      .member-tag { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
     }
   </style>
 </body>

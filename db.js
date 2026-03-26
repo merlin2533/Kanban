@@ -146,12 +146,29 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS board_members (
     board_id TEXT NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    role TEXT NOT NULL DEFAULT 'editor',
     PRIMARY KEY (board_id, user_id)
   );
-  CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
   CREATE INDEX IF NOT EXISTS idx_board_members_board_id ON board_members(board_id);
+  CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
 `);
+
+// Migration: populate board_members for existing boards/users (backward compatibility)
+try {
+  const memberCount = db.prepare('SELECT COUNT(*) as c FROM board_members').get().c;
+  if (memberCount === 0) {
+    const existingBoards = db.prepare('SELECT id FROM boards').all();
+    const existingUsers = db.prepare('SELECT id FROM users').all();
+    const insertMember = db.prepare('INSERT OR IGNORE INTO board_members (board_id, user_id) VALUES (?, ?)');
+    const populate = db.transaction(() => {
+      for (const board of existingBoards) {
+        for (const user of existingUsers) {
+          insertMember.run(board.id, user.id);
+        }
+      }
+    });
+    populate();
+  }
+} catch {}
 
 // Migration: add description column if missing
 try {
@@ -275,40 +292,29 @@ function getAllBoards() {
   return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
 }
 
-function getUserBoards(userId) {
-  const user = db.prepare('SELECT is_admin FROM users WHERE id = ?').get(userId);
-  if (user && user.is_admin) {
-    // System admins see all boards
-    return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
-  }
-  // Regular users see only boards they're a member of
-  return db.prepare(`
-    SELECT b.id, b.title, b.created_at FROM boards b
-    JOIN board_members bm ON b.id = bm.board_id
-    WHERE bm.user_id = ?
-    ORDER BY b.created_at DESC
-  `).all(userId);
+function getBoardsForUser(userId) {
+  return db.prepare(
+    'SELECT b.id, b.title, b.created_at FROM boards b JOIN board_members bm ON b.id = bm.board_id WHERE bm.user_id = ? ORDER BY b.created_at DESC'
+  ).all(userId);
 }
 
-function addBoardMember(boardId, userId, role) {
-  db.prepare('INSERT OR REPLACE INTO board_members (board_id, user_id, role) VALUES (?, ?, ?)').run(boardId, userId, role || 'editor');
+function getBoardMembers(boardId) {
+  return db.prepare(
+    'SELECT u.id, u.username, u.is_admin FROM users u JOIN board_members bm ON u.id = bm.user_id WHERE bm.board_id = ? ORDER BY u.username'
+  ).all(boardId);
+}
+
+function isBoardMember(boardId, userId) {
+  const row = db.prepare('SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ?').get(boardId, userId);
+  return !!row;
+}
+
+function addBoardMember(boardId, userId) {
+  db.prepare('INSERT OR IGNORE INTO board_members (board_id, user_id) VALUES (?, ?)').run(boardId, userId);
 }
 
 function removeBoardMember(boardId, userId) {
   db.prepare('DELETE FROM board_members WHERE board_id = ? AND user_id = ?').run(boardId, userId);
-}
-
-function getBoardMembers(boardId) {
-  return db.prepare(`
-    SELECT u.id, u.username, u.is_admin as is_system_admin, bm.role
-    FROM users u JOIN board_members bm ON u.id = bm.user_id
-    WHERE bm.board_id = ?
-    ORDER BY bm.role, u.username
-  `).all(boardId);
-}
-
-function isUserBoardMember(boardId, userId) {
-  return !!db.prepare('SELECT 1 FROM board_members WHERE board_id = ? AND user_id = ?').get(boardId, userId);
 }
 
 function getUsers() {
@@ -331,7 +337,7 @@ function logActivity(boardId, action, details) {
 
 // --- Boards ---
 
-function createBoard(title) {
+function createBoard(title, creatorUserId) {
   const id = nanoid();
   const insert = db.transaction(() => {
     db.prepare('INSERT INTO boards (id, title) VALUES (?, ?)').run(id, title || 'Untitled Board');
@@ -339,6 +345,9 @@ function createBoard(title) {
     defaults.forEach((t, i) => {
       db.prepare('INSERT INTO columns (board_id, title, position) VALUES (?, ?, ?)').run(id, t, i);
     });
+    if (creatorUserId) {
+      db.prepare('INSERT OR IGNORE INTO board_members (board_id, user_id) VALUES (?, ?)').run(id, creatorUserId);
+    }
     logActivity(id, 'board_created', { title: title || 'Untitled Board' });
   });
   insert();
@@ -997,9 +1006,9 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getAllBoards, getUserBoards, getUsers, deleteUser,
+  getAllBoards, getBoardsForUser, getUsers, deleteUser,
   // Board members
-  addBoardMember, removeBoardMember, getBoardMembers, isUserBoardMember,
+  getBoardMembers, isBoardMember, addBoardMember, removeBoardMember,
   // Webhooks
   createWebhook, getWebhooks, deleteWebhook, getActiveWebhooks,
   // Board Templates

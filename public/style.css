@@ -878,6 +878,29 @@ main#board {
   width: 240px;
 }
 
+/* --- Board Switcher --- */
+.board-switcher-wrap {
+  display: flex;
+  align-items: center;
+}
+
+.board-switcher {
+  padding: 6px 10px;
+  border: 1.5px solid #2563eb;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 500;
+  outline: none;
+  background: #eff6ff;
+  color: #1d4ed8;
+  cursor: pointer;
+  max-width: 180px;
+}
+
+.board-switcher:focus-visible {
+  outline: 2px solid #2563eb;
+}
+
 /* --- Sort --- */
 .board-sort {
   padding: 6px 8px;
@@ -1157,6 +1180,7 @@ main#board {
   .comment-text { color: #e2e8f0; }
   .board-search { background: #334155; color: #e2e8f0; border-color: #475569; }
   .board-sort { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .board-switcher { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
   .board-list-item { background: #334155; border-color: #475569; color: #e2e8f0; }
   .board-list-item:hover { background: #1e3a5f; border-color: #2563eb; }
   .import-label { background: #334155; border-color: #475569; color: #e2e8f0; }
