@@ -4,26 +4,127 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Einstellungen - Kanban Board</title>
-  <link rel="stylesheet" href="/style.css">
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <meta name="color-scheme" content="light dark">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+      min-height: 100vh;
+    }
+
+    /* Top nav */
+    .topnav {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 12px 24px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+    }
+    .topnav-left { display: flex; align-items: center; gap: 12px; }
+    .topnav-logo { font-size: 22px; font-weight: 700; color: #2563eb; text-decoration: none; }
+    .topnav-right { display: flex; align-items: center; gap: 8px; }
+    .nav-link {
+      padding: 6px 14px; border-radius: 8px; text-decoration: none;
+      font-size: 13px; font-weight: 500; color: #475569; transition: background 0.15s;
+    }
+    .nav-link:hover { background: #f1f5f9; }
+    .nav-link.active { background: #f1f5f9; color: #1e293b; }
+    .nav-link.admin { color: #7c3aed; }
+    .nav-link.admin:hover { background: #f5f3ff; }
+    .btn-logout {
+      padding: 6px 14px; background: #fee2e2; color: #dc2626; border: none;
+      border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 500;
+    }
+    .btn-logout:hover { background: #fecaca; }
+
+    /* Main */
+    .main { max-width: 520px; margin: 0 auto; padding: 32px 24px; }
+    .page-header { margin-bottom: 28px; }
+    .page-header h1 { font-size: 26px; color: #1e293b; margin-bottom: 6px; }
+    .page-header p { color: #64748b; font-size: 14px; }
+
+    /* Card */
+    .settings-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 16px;
+    }
+    .settings-card h2 { font-size: 18px; color: #1e293b; margin-bottom: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 4px; }
+    .form-group input {
+      width: 100%; padding: 9px 12px; border: 1px solid #e2e8f0;
+      border-radius: 8px; font-size: 14px; outline: none;
+    }
+    .form-group input:focus { border-color: #2563eb; }
+    .btn-primary {
+      padding: 10px 22px; background: #2563eb; color: #fff; border: none;
+      border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer;
+    }
+    .btn-primary:hover { background: #1d4ed8; }
+    .pw-status {
+      font-size: 13px; margin-bottom: 16px; padding: 8px 12px;
+      border-radius: 6px; background: #f8fafc;
+    }
+    .pw-status.warn { background: #fef2f2; color: #dc2626; }
+    .pw-status.ok { background: #f0fdf4; color: #16a34a; }
+    #pwResult { margin-top: 12px; font-size: 13px; }
+
+    /* Dark mode */
+    @media (prefers-color-scheme: dark) {
+      body { background: #0f172a; }
+      .topnav { background: #1e293b; border-color: #334155; }
+      .topnav-logo { color: #60a5fa; }
+      .nav-link { color: #94a3b8; }
+      .nav-link:hover { background: #334155; }
+      .nav-link.active { background: #334155; color: #e2e8f0; }
+      .nav-link.admin { color: #a78bfa; }
+      .nav-link.admin:hover { background: #2d2150; }
+      .btn-logout { background: #3b1c1c; color: #f87171; }
+      .page-header h1 { color: #e2e8f0; }
+      .page-header p { color: #94a3b8; }
+      .settings-card { background: #1e293b; border-color: #334155; }
+      .settings-card h2 { color: #e2e8f0; }
+      .form-group label { color: #94a3b8; }
+      .form-group input { background: #334155; color: #e2e8f0; border-color: #475569; }
+      .form-group input:focus { border-color: #2563eb; }
+      .pw-status { background: #334155; color: #94a3b8; }
+      .pw-status.warn { background: #3b1c1c; color: #f87171; }
+      .pw-status.ok { background: #0a2e1a; color: #4ade80; }
+    }
+  </style>
 </head>
 <body>
-  <header>
-    <a href="/" class="home-link">&#9633;&#9633;&#9633;</a>
-    <h1>Einstellungen</h1>
-    <div class="header-actions">
-      <button id="logoutBtn" class="icon-btn" title="Abmelden">&#128682;</button>
+  <nav class="topnav">
+    <div class="topnav-left">
+      <a href="/" class="topnav-logo">Kanban</a>
     </div>
-  </header>
+    <div class="topnav-right" id="navActions">
+      <a href="/" class="nav-link">Boards</a>
+      <a href="/settings.html" class="nav-link active" id="navUser">Einstellungen</a>
+      <button class="btn-logout" id="logoutBtn">Abmelden</button>
+    </div>
+  </nav>
 
-  <div style="max-width:600px;margin:24px auto;padding:0 16px;">
-    <!-- Password Change -->
+  <div class="main">
+    <div class="page-header">
+      <h1>Einstellungen</h1>
+      <p>Dein Profil und Passwort verwalten.</p>
+    </div>
+
     <div class="settings-card">
-      <h2>Passwort ändern</h2>
-      <p id="passwordAge" style="color:#64748b;font-size:13px;margin-bottom:16px;"></p>
+      <h2>Passwort aendern</h2>
+      <div class="pw-status" id="passwordAge"></div>
       <form id="passwordForm">
         <div class="form-group">
           <label for="currentPassword">Aktuelles Passwort</label>
@@ -34,33 +135,12 @@
           <input type="password" id="newPassword" minlength="6" required>
         </div>
         <div class="form-group">
-          <label for="confirmPassword">Passwort bestätigen</label>
+          <label for="confirmPassword">Passwort bestaetigen</label>
           <input type="password" id="confirmPassword" required>
         </div>
-        <button type="submit" class="btn-primary">Passwort ändern</button>
-        <div id="pwResult" style="margin-top:12px;font-size:13px;"></div>
+        <button type="submit" class="btn-primary">Passwort aendern</button>
+        <div id="pwResult"></div>
       </form>
-    </div>
-
-    <!-- Admin: User Management -->
-    <div class="settings-card" id="adminSection" style="display:none;">
-      <h2>Benutzerverwaltung</h2>
-      <div id="userList"></div>
-      <h3 style="margin-top:16px;font-size:14px;">Neuer Benutzer</h3>
-      <form id="addUserForm" style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap;">
-        <input type="text" id="newUsername" placeholder="Benutzername" required style="flex:1;min-width:120px;">
-        <input type="password" id="newUserPassword" placeholder="Passwort" required style="flex:1;min-width:120px;">
-        <label style="display:flex;align-items:center;gap:4px;font-size:13px;"><input type="checkbox" id="newUserAdmin"> Admin</label>
-        <button type="submit" class="btn-primary" style="padding:8px 16px;">Erstellen</button>
-      </form>
-      <div id="addUserError" style="display:none;color:#dc2626;font-size:13px;margin-top:8px;"></div>
-    </div>
-
-    <!-- Admin: Board Access Control -->
-    <div class="settings-card" id="boardAccessSection" style="display:none;">
-      <h2>Board-Zugriff</h2>
-      <p style="color:#64748b;font-size:13px;margin-bottom:16px;">Verwalte, welche Benutzer auf welche Boards zugreifen können. Admins haben immer Zugriff auf alle Boards.</p>
-      <div id="boardAccessList"></div>
     </div>
   </div>
 
@@ -72,144 +152,28 @@
         const data = await fetch('/api/auth/status').then(r => r.json());
         if (!data.authenticated) { window.location.href = '/login.html'; return; }
         currentUser = data.user;
+        document.getElementById('navUser').textContent = currentUser.username;
+
+        // Admin link
+        if (currentUser.is_admin) {
+          const adminLink = document.createElement('a');
+          adminLink.href = '/admin.html';
+          adminLink.className = 'nav-link admin';
+          adminLink.textContent = 'Admin';
+          const nav = document.getElementById('navActions');
+          nav.insertBefore(adminLink, document.getElementById('logoutBtn'));
+        }
 
         // Password age
         const pwAge = document.getElementById('passwordAge');
         if (data.passwordReminder) {
-          pwAge.textContent = 'Dein Passwort sollte geändert werden (älter als 14 Tage).';
-          pwAge.style.color = '#dc2626';
+          pwAge.textContent = 'Dein Passwort sollte geaendert werden (aelter als 14 Tage).';
+          pwAge.classList.add('warn');
         } else {
           pwAge.textContent = 'Passwort ist aktuell.';
-        }
-
-        // Admin section
-        if (currentUser.is_admin) {
-          document.getElementById('adminSection').style.display = '';
-          document.getElementById('boardAccessSection').style.display = '';
-          loadUsers();
-          loadBoardAccess();
+          pwAge.classList.add('ok');
         }
       } catch { window.location.href = '/login.html'; }
-    }
-
-    async function loadUsers() {
-      const res = await fetch('/api/admin/users');
-      const users = await res.json();
-      const list = document.getElementById('userList');
-      list.innerHTML = '';
-      for (const user of users) {
-        const div = document.createElement('div');
-        div.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid #e2e8f0;';
-        const nameSpan = document.createElement('span');
-        nameSpan.textContent = user.username + (user.is_admin ? ' (Admin)' : '');
-        if (user.is_admin) nameSpan.style.fontWeight = 'bold';
-        div.appendChild(nameSpan);
-        if (user.id !== currentUser.id) {
-          const del = document.createElement('button');
-          del.className = 'danger-btn';
-          del.style.cssText = 'padding:4px 12px;font-size:12px;';
-          del.textContent = 'Löschen';
-          del.onclick = async () => {
-            if (!confirm('Benutzer ' + user.username + ' löschen?')) return;
-            await fetch('/api/admin/users/' + user.id, { method: 'DELETE', headers: { 'X-Requested-With': 'kanban' } });
-            loadUsers();
-          };
-          div.appendChild(del);
-        }
-        list.appendChild(div);
-      }
-    }
-
-    async function loadBoardAccess() {
-      const [boardsRes, usersRes] = await Promise.all([
-        fetch('/api/boards'),
-        fetch('/api/admin/users')
-      ]);
-      const boards = await boardsRes.json();
-      const allUsers = await usersRes.json();
-      const nonAdminUsers = allUsers.filter(u => !u.is_admin);
-
-      const container = document.getElementById('boardAccessList');
-      container.innerHTML = '';
-
-      if (boards.length === 0) {
-        container.innerHTML = '<p style="color:#94a3b8;font-size:13px;">Keine Boards vorhanden.</p>';
-        return;
-      }
-
-      for (const board of boards) {
-        const boardDiv = document.createElement('div');
-        boardDiv.className = 'board-access-item';
-        boardDiv.dataset.boardId = board.id;
-
-        const header = document.createElement('div');
-        header.className = 'board-access-header';
-        const titleStrong = document.createElement('strong');
-        titleStrong.textContent = board.title;
-        header.appendChild(titleStrong);
-        boardDiv.appendChild(header);
-
-        const membersDiv = document.createElement('div');
-        membersDiv.className = 'board-access-members';
-        membersDiv.id = 'members-' + board.id;
-        boardDiv.appendChild(membersDiv);
-
-        if (nonAdminUsers.length > 0) {
-          const addRow = document.createElement('div');
-          addRow.style.cssText = 'display:flex;gap:8px;margin-top:8px;';
-          const sel = document.createElement('select');
-          sel.className = 'board-sort';
-          sel.style.flex = '1';
-          sel.innerHTML = '<option value="">+ Benutzer hinzufügen...</option>';
-          for (const u of nonAdminUsers) {
-            const opt = document.createElement('option');
-            opt.value = u.id;
-            opt.textContent = u.username;
-            sel.appendChild(opt);
-          }
-          const addBtn = document.createElement('button');
-          addBtn.className = 'btn-primary';
-          addBtn.style.cssText = 'padding:6px 14px;font-size:13px;';
-          addBtn.textContent = 'Hinzufügen';
-          addBtn.onclick = async () => {
-            if (!sel.value) return;
-            await fetch('/api/boards/' + board.id + '/members', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
-              body: JSON.stringify({ user_id: parseInt(sel.value) })
-            });
-            sel.value = '';
-            renderMembers(board.id, membersDiv, nonAdminUsers);
-          };
-          addRow.appendChild(sel);
-          addRow.appendChild(addBtn);
-          boardDiv.appendChild(addRow);
-        }
-
-        container.appendChild(boardDiv);
-        renderMembers(board.id, membersDiv, nonAdminUsers);
-      }
-    }
-
-    async function renderMembers(boardId, container, allNonAdmins) {
-      const res = await fetch('/api/boards/' + boardId + '/members');
-      const members = await res.json();
-      const nonAdminMembers = members.filter(m => !m.is_admin);
-      container.innerHTML = '';
-      if (nonAdminMembers.length === 0) {
-        container.innerHTML = '<span style="font-size:12px;color:#94a3b8;">Nur Admins</span>';
-        return;
-      }
-      for (const member of nonAdminMembers) {
-        const tag = document.createElement('span');
-        tag.className = 'member-tag';
-        tag.innerHTML = member.username + ' <button class="member-remove" data-uid="' + member.id + '" title="Entfernen">&times;</button>';
-        tag.querySelector('.member-remove').onclick = async () => {
-          await fetch('/api/boards/' + boardId + '/members/' + member.id, { method: 'DELETE', headers: { 'X-Requested-With': 'kanban' } });
-          renderMembers(boardId, container, allNonAdmins);
-        };
-        container.appendChild(tag);
-      }
     }
 
     document.getElementById('passwordForm').addEventListener('submit', async (e) => {
@@ -217,8 +181,11 @@
       const result = document.getElementById('pwResult');
       const newPw = document.getElementById('newPassword').value;
       const confirmPw = document.getElementById('confirmPassword').value;
-      if (newPw !== confirmPw) { result.textContent = 'Passwörter stimmen nicht überein.'; result.style.color = '#dc2626'; return; }
-
+      if (newPw !== confirmPw) {
+        result.textContent = 'Passwoerter stimmen nicht ueberein.';
+        result.style.color = '#dc2626';
+        return;
+      }
       const res = await fetch('/api/auth/change-password', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
@@ -226,28 +193,15 @@
       });
       const data = await res.json();
       if (res.ok) {
-        result.textContent = 'Passwort erfolgreich geändert!';
+        result.textContent = 'Passwort erfolgreich geaendert!';
         result.style.color = '#16a34a';
         document.getElementById('passwordForm').reset();
+        document.getElementById('passwordAge').textContent = 'Passwort ist aktuell.';
+        document.getElementById('passwordAge').className = 'pw-status ok';
       } else {
         result.textContent = data.error;
         result.style.color = '#dc2626';
       }
-    });
-
-    document.getElementById('addUserForm').addEventListener('submit', async (e) => {
-      e.preventDefault();
-      const res = await fetch('/api/admin/users', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
-        body: JSON.stringify({
-          username: document.getElementById('newUsername').value,
-          password: document.getElementById('newUserPassword').value,
-          is_admin: document.getElementById('newUserAdmin').checked
-        })
-      });
-      if (res.ok) { document.getElementById('addUserError').style.display='none'; document.getElementById('addUserForm').reset(); loadUsers(); }
-      else { const d = await res.json(); const e=document.getElementById('addUserError'); e.textContent=d.error||'Fehler'; e.style.display='block'; }
     });
 
     document.getElementById('logoutBtn').onclick = async () => {
@@ -257,58 +211,5 @@
 
     init();
   </script>
-  <style>
-    .settings-card {
-      background: #fff;
-      border-radius: 12px;
-      padding: 24px;
-      margin-bottom: 16px;
-      box-shadow: 0 1px 3px rgba(0,0,0,0.08);
-    }
-    .settings-card h2 { font-size: 18px; margin-bottom: 12px; }
-    .form-group { margin-bottom: 12px; }
-    .form-group label { display: block; font-size: 13px; font-weight: 600; color: #475569; margin-bottom: 4px; }
-    .form-group input { width: 100%; padding: 8px 12px; border: 1px solid #e2e8f0; border-radius: 6px; font-size: 14px; }
-    .btn-primary { padding: 10px 20px; background: #2563eb; color: #fff; border: none; border-radius: 8px; font-size: 14px; font-weight: 600; cursor: pointer; }
-    .btn-primary:hover { background: #1d4ed8; }
-    .board-access-item {
-      border: 1px solid #e2e8f0;
-      border-radius: 8px;
-      padding: 12px 14px;
-      margin-bottom: 12px;
-    }
-    .board-access-header { margin-bottom: 8px; font-size: 14px; }
-    .board-access-members { display: flex; flex-wrap: wrap; gap: 6px; min-height: 24px; }
-    .member-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 4px;
-      background: #eff6ff;
-      color: #1d4ed8;
-      border: 1px solid #bfdbfe;
-      border-radius: 20px;
-      padding: 2px 10px;
-      font-size: 12px;
-    }
-    .member-remove {
-      background: none;
-      border: none;
-      color: #64748b;
-      cursor: pointer;
-      padding: 0 2px;
-      font-size: 14px;
-      line-height: 1;
-    }
-    .member-remove:hover { color: #dc2626; }
-    @media (prefers-color-scheme: dark) {
-      .settings-card { background: #1e293b; }
-      .settings-card h2 { color: #e2e8f0; }
-      .form-group label { color: #94a3b8; }
-      .form-group input { background: #334155; color: #e2e8f0; border-color: #475569; }
-      .form-group input:focus { border-color: #2563eb; outline: 1px solid #2563eb; }
-      .board-access-item { border-color: #334155; }
-      .member-tag { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
-    }
-  </style>
 </body>
 </html>
