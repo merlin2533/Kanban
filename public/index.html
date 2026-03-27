@@ -18,91 +18,284 @@
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
       background: #f0f2f5;
       min-height: 100vh;
+    }
+    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+
+    /* Top nav */
+    .topnav {
+      background: #fff;
+      border-bottom: 1px solid #e2e8f0;
+      padding: 12px 24px;
       display: flex;
       align-items: center;
-      justify-content: center;
+      justify-content: space-between;
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
-    .container {
-      background: #fff;
-      border-radius: 16px;
-      box-shadow: 0 4px 24px rgba(0,0,0,0.1);
-      padding: 48px;
-      max-width: 480px;
-      width: 90%;
-      text-align: center;
+    .topnav-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
     }
-    h1 {
-      font-size: 28px;
+    .topnav-logo {
+      font-size: 22px;
+      font-weight: 700;
+      color: #2563eb;
+      text-decoration: none;
+    }
+    .topnav-right {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .nav-link {
+      padding: 6px 14px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 500;
+      color: #475569;
+      transition: background 0.15s;
+    }
+    .nav-link:hover { background: #f1f5f9; }
+    .nav-link.admin { color: #7c3aed; }
+    .nav-link.admin:hover { background: #f5f3ff; }
+    .btn-logout {
+      padding: 6px 14px;
+      background: #fee2e2;
+      color: #dc2626;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    .btn-logout:hover { background: #fecaca; }
+
+    /* Main content */
+    .main {
+      max-width: 960px;
+      margin: 0 auto;
+      padding: 32px 24px;
+    }
+    .page-header {
+      margin-bottom: 28px;
+    }
+    .page-header h1 {
+      font-size: 26px;
       color: #1e293b;
-      margin-bottom: 8px;
+      margin-bottom: 6px;
     }
-    p {
+    .page-header p {
       color: #64748b;
-      margin-bottom: 32px;
-      font-size: 15px;
+      font-size: 14px;
     }
-    .form-group {
+
+    /* Create bar */
+    .create-bar {
       display: flex;
       gap: 8px;
-      margin-bottom: 16px;
+      margin-bottom: 32px;
     }
-    input {
+    .create-bar input {
       flex: 1;
-      padding: 12px 16px;
+      padding: 10px 16px;
       border: 2px solid #e2e8f0;
       border-radius: 10px;
-      font-size: 16px;
-      outline: 2px solid transparent;
+      font-size: 15px;
+      outline: none;
       transition: border-color 0.2s;
     }
-    input:focus { border-color: #2563eb; }
-    button {
-      padding: 12px 24px;
+    .create-bar input:focus { border-color: #2563eb; }
+    .create-bar button {
+      padding: 10px 22px;
       background: #2563eb;
       color: #fff;
       border: none;
       border-radius: 10px;
-      font-size: 16px;
+      font-size: 15px;
       font-weight: 600;
       cursor: pointer;
-      transition: background 0.2s;
       white-space: nowrap;
     }
-    button:hover { background: #1d4ed8; }
-    .logo {
-      font-size: 48px;
-      margin-bottom: 16px;
+    .create-bar button:hover { background: #1d4ed8; }
+    .create-error {
+      display: none;
+      color: #dc2626;
+      font-size: 13px;
+      margin-top: -20px;
+      margin-bottom: 20px;
     }
-    .sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);border:0;}
+
+    /* Board grid */
+    .section-title {
+      font-size: 15px;
+      font-weight: 600;
+      color: #64748b;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      margin-bottom: 14px;
+    }
+    .board-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+      gap: 16px;
+      margin-bottom: 32px;
+    }
+    .board-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 20px;
+      text-decoration: none;
+      color: inherit;
+      transition: box-shadow 0.15s, border-color 0.15s, transform 0.1s;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+    .board-card:hover {
+      box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+      border-color: #2563eb;
+      transform: translateY(-2px);
+    }
+    .board-card-title {
+      font-size: 17px;
+      font-weight: 600;
+      color: #1e293b;
+      line-height: 1.3;
+    }
+    .board-card-stats {
+      display: flex;
+      gap: 16px;
+      font-size: 13px;
+      color: #64748b;
+    }
+    .board-card-stat {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .board-card-date {
+      font-size: 12px;
+      color: #94a3b8;
+    }
+    .board-card.empty {
+      border: 2px dashed #cbd5e1;
+      align-items: center;
+      justify-content: center;
+      color: #94a3b8;
+      font-size: 14px;
+      min-height: 100px;
+      cursor: default;
+    }
+
+    /* Import section */
+    .import-section {
+      margin-top: 8px;
+    }
+    .import-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 8px 16px;
+      background: #f8fafc;
+      border: 1px dashed #cbd5e1;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 13px;
+      color: #64748b;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .import-label:hover { background: #f1f5f9; border-color: #94a3b8; }
+
+    /* Template section */
+    .template-card {
+      background: #fff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 16px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .template-card:hover { border-color: #cbd5e1; }
+    .template-name { font-size: 14px; font-weight: 500; color: #334155; }
+    .template-cols { font-size: 12px; color: #94a3b8; }
+    .btn-small {
+      padding: 5px 14px;
+      background: #2563eb;
+      color: #fff;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+    }
+    .btn-small:hover { background: #1d4ed8; }
+
+    /* Dark mode */
     @media (prefers-color-scheme: dark) {
       body { background: #0f172a; }
-      .container { background: #1e293b; box-shadow: 0 4px 24px rgba(0,0,0,0.3); }
-      h1 { color: #e2e8f0; }
-      p { color: #94a3b8; }
-      input { background: #334155; color: #e2e8f0; border-color: #475569; }
-      input:focus { border-color: #2563eb; }
-      button { background: #2563eb; }
-      .board-list-item { background: #334155; border-color: #475569; color: #e2e8f0; }
-      .board-list-item:hover { background: #1e3a5f; border-color: #2563eb; }
-      .board-list-title { color: #e2e8f0; }
-      .import-label { background: #334155; border-color: #475569; color: #e2e8f0; }
+      .topnav { background: #1e293b; border-color: #334155; }
+      .topnav-logo { color: #60a5fa; }
+      .nav-link { color: #94a3b8; }
+      .nav-link:hover { background: #334155; }
+      .nav-link.admin { color: #a78bfa; }
+      .nav-link.admin:hover { background: #2d2150; }
+      .btn-logout { background: #3b1c1c; color: #f87171; }
+      .btn-logout:hover { background: #4c2020; }
+      .page-header h1 { color: #e2e8f0; }
+      .page-header p { color: #94a3b8; }
+      .section-title { color: #94a3b8; }
+      .create-bar input { background: #1e293b; color: #e2e8f0; border-color: #475569; }
+      .create-bar input:focus { border-color: #2563eb; }
+      .board-card { background: #1e293b; border-color: #334155; }
+      .board-card:hover { border-color: #2563eb; box-shadow: 0 4px 16px rgba(0,0,0,0.3); }
+      .board-card-title { color: #e2e8f0; }
+      .board-card-stats { color: #94a3b8; }
+      .board-card-date { color: #64748b; }
+      .board-card.empty { border-color: #475569; color: #64748b; }
+      .import-label { background: #1e293b; border-color: #475569; color: #94a3b8; }
+      .import-label:hover { background: #334155; }
+      .template-card { background: #1e293b; border-color: #334155; }
+      .template-card:hover { border-color: #475569; }
+      .template-name { color: #e2e8f0; }
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="logo">&#9633;&#9633;&#9633;</div>
-    <h1>Kanban Board</h1>
-    <p>Erstelle ein neues Board und teile den Link mit deinem Team.</p>
-    <form id="createForm">
-      <div class="form-group">
-        <label for="title" class="sr-only">Board-Name</label>
-        <input type="text" id="title" placeholder="Board-Name..." autofocus>
-        <button type="submit">Erstellen</button>
-      </div>
+  <!-- Top navigation -->
+  <nav class="topnav">
+    <div class="topnav-left">
+      <a href="/" class="topnav-logo">Kanban</a>
+    </div>
+    <div class="topnav-right" id="navActions"></div>
+  </nav>
+
+  <div class="main">
+    <div class="page-header">
+      <h1>Deine Boards</h1>
+      <p>Erstelle und verwalte deine Kanban Boards.</p>
+    </div>
+
+    <!-- Create board -->
+    <form id="createForm" class="create-bar">
+      <label for="title" class="sr-only">Board-Name</label>
+      <input type="text" id="title" placeholder="Neues Board erstellen..." autofocus>
+      <button type="submit">+ Erstellen</button>
     </form>
-    <div id="createError" style="display:none;color:#dc2626;font-size:13px;margin-top:8px;text-align:center;"></div>
-    <div id="boardList" class="board-list"></div>
+    <div class="create-error" id="createError"></div>
+
+    <!-- Board list -->
+    <div id="boardSection"></div>
+
+    <!-- Templates -->
+    <div id="templateSection"></div>
+
+    <!-- Import -->
     <div class="import-section">
       <label for="importFile" class="import-label">
         <span>&#128194; Board importieren (JSON)</span>
@@ -110,116 +303,185 @@
       </label>
     </div>
   </div>
+
   <script>
-    // Auth check
     let currentUser = null;
+
     async function checkAuth() {
-      console.log('[AUTH] index.html checkAuth: starting, cookies:', document.cookie || '(HttpOnly - not visible from JS)');
       try {
         const res = await fetch('/api/auth/status');
-        console.log('[AUTH] index.html checkAuth: /api/auth/status response status:', res.status);
         const data = await res.json();
-        console.log('[AUTH] index.html checkAuth: response data:', JSON.stringify(data));
         if (data.authenticated) {
           currentUser = data.user;
-          console.log('[AUTH] index.html checkAuth: authenticated as', currentUser.username);
-          // Show settings link and logout
-          const nav = document.createElement('div');
-          nav.style.cssText = 'position:fixed;top:12px;right:12px;display:flex;gap:8px;';
-          const settingsLink = document.createElement('a');
-          settingsLink.href = '/settings.html';
-          settingsLink.style.cssText = 'padding:6px 12px;background:#f1f5f9;border-radius:6px;text-decoration:none;color:#475569;font-size:13px;';
-          settingsLink.textContent = '\u2699 ' + currentUser.username;
-          nav.appendChild(settingsLink);
-          const logoutBtn = document.createElement('button');
-          logoutBtn.textContent = 'Abmelden';
-          logoutBtn.style.cssText = 'padding:6px 12px;background:#fee2e2;color:#dc2626;border:none;border-radius:6px;cursor:pointer;font-size:13px;';
-          logoutBtn.onclick = async () => { await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'kanban' } }); window.location.reload(); };
-          nav.appendChild(logoutBtn);
-          document.body.appendChild(nav);
+          buildNav();
           return true;
         } else {
-          console.warn('[AUTH] index.html checkAuth: NOT authenticated, redirecting to login. Response:', JSON.stringify(data));
           window.location.href = '/login.html';
           return false;
         }
       } catch (err) {
-        console.error('[AUTH] index.html checkAuth: ERROR', err);
         window.location.href = '/login.html';
         return false;
       }
     }
+
+    function buildNav() {
+      const nav = document.getElementById('navActions');
+      nav.innerHTML = '';
+
+      const settingsLink = document.createElement('a');
+      settingsLink.href = '/settings.html';
+      settingsLink.className = 'nav-link';
+      settingsLink.textContent = currentUser.username;
+      nav.appendChild(settingsLink);
+
+      if (currentUser.is_admin) {
+        const adminLink = document.createElement('a');
+        adminLink.href = '/admin.html';
+        adminLink.className = 'nav-link admin';
+        adminLink.textContent = 'Admin';
+        nav.appendChild(adminLink);
+      }
+
+      const logoutBtn = document.createElement('button');
+      logoutBtn.className = 'btn-logout';
+      logoutBtn.textContent = 'Abmelden';
+      logoutBtn.onclick = async () => {
+        await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'kanban' } });
+        window.location.reload();
+      };
+      nav.appendChild(logoutBtn);
+    }
+
     checkAuth().then(authed => {
       if (!authed) return;
       loadBoards();
       loadTemplates();
     });
 
+    // Create board
     document.getElementById('createForm').addEventListener('submit', async (e) => {
       e.preventDefault();
+      const errEl = document.getElementById('createError');
+      errEl.style.display = 'none';
       const title = document.getElementById('title').value.trim() || 'Mein Board';
       const res = await fetch('/api/boards', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
         body: JSON.stringify({ title })
       });
-      if (!res.ok) { const d = await res.json().catch(() => ({})); const e=document.getElementById('createError'); e.textContent=d.error||'Board erstellen fehlgeschlagen'; e.style.display='block'; return; }
+      if (!res.ok) {
+        const d = await res.json().catch(() => ({}));
+        errEl.textContent = d.error || 'Board erstellen fehlgeschlagen';
+        errEl.style.display = 'block';
+        return;
+      }
       const board = await res.json();
       window.location.href = '/board/' + board.id;
     });
 
-    // Load existing boards
+    // Load boards
     async function loadBoards() {
       try {
         const res = await fetch('/api/boards');
         const boards = await res.json();
-        const list = document.getElementById('boardList');
-        list.innerHTML = '';
-        if (boards.length > 0) {
-          const heading = document.createElement('h2');
-          heading.textContent = 'Deine Boards';
-          heading.style.cssText = 'font-size:18px;margin:24px 0 12px;text-align:left;';
-          list.appendChild(heading);
-          for (const board of boards) {
-            const link = document.createElement('a');
-            link.href = '/board/' + board.id;
-            link.className = 'board-list-item';
-            const titleSpan = document.createElement('span');
-            titleSpan.className = 'board-list-title';
-            titleSpan.textContent = board.title;
-            const dateSpan = document.createElement('span');
-            dateSpan.className = 'board-list-date';
-            dateSpan.textContent = new Date(board.created_at + 'Z').toLocaleDateString('de-DE');
-            link.appendChild(titleSpan);
-            link.appendChild(dateSpan);
-            list.appendChild(link);
-          }
+        const section = document.getElementById('boardSection');
+        section.innerHTML = '';
+
+        if (boards.length === 0) {
+          const grid = document.createElement('div');
+          grid.className = 'board-grid';
+          const empty = document.createElement('div');
+          empty.className = 'board-card empty';
+          empty.textContent = 'Noch keine Boards vorhanden. Erstelle dein erstes Board!';
+          grid.appendChild(empty);
+          section.appendChild(grid);
+          return;
         }
+
+        const heading = document.createElement('div');
+        heading.className = 'section-title';
+        heading.textContent = boards.length + (boards.length === 1 ? ' Board' : ' Boards');
+        section.appendChild(heading);
+
+        const grid = document.createElement('div');
+        grid.className = 'board-grid';
+
+        for (const board of boards) {
+          const card = document.createElement('a');
+          card.href = '/board/' + board.id;
+          card.className = 'board-card';
+
+          const title = document.createElement('div');
+          title.className = 'board-card-title';
+          title.textContent = board.title;
+          card.appendChild(title);
+
+          const stats = document.createElement('div');
+          stats.className = 'board-card-stats';
+
+          const colStat = document.createElement('span');
+          colStat.className = 'board-card-stat';
+          colStat.innerHTML = '&#9633; ' + (board.column_count || 0) + ' Spalten';
+          stats.appendChild(colStat);
+
+          const cardStat = document.createElement('span');
+          cardStat.className = 'board-card-stat';
+          cardStat.innerHTML = '&#9635; ' + (board.card_count || 0) + ' Karten';
+          stats.appendChild(cardStat);
+
+          card.appendChild(stats);
+
+          const date = document.createElement('div');
+          date.className = 'board-card-date';
+          date.textContent = 'Erstellt am ' + new Date(board.created_at + 'Z').toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+          card.appendChild(date);
+
+          grid.appendChild(card);
+        }
+
+        section.appendChild(grid);
       } catch (e) { console.error(e); }
     }
 
+    // Load templates
     async function loadTemplates() {
       try {
         const res = await fetch('/api/templates');
         if (!res.ok) return;
         const templates = await res.json();
         if (templates.length === 0) return;
-        const list = document.getElementById('boardList');
-        const heading = document.createElement('h2');
+
+        const section = document.getElementById('templateSection');
+        section.innerHTML = '';
+
+        const heading = document.createElement('div');
+        heading.className = 'section-title';
         heading.textContent = 'Vorlagen';
-        heading.style.cssText = 'font-size:18px;margin:24px 0 12px;text-align:left;';
-        list.appendChild(heading);
+        section.appendChild(heading);
+
+        const grid = document.createElement('div');
+        grid.className = 'board-grid';
+
         for (const t of templates) {
           const cols = JSON.parse(t.columns_json);
-          const item = document.createElement('div');
-          item.className = 'board-list-item';
-          item.style.cursor = 'pointer';
-          const titleSpan = document.createElement('span');
-          titleSpan.className = 'board-list-title';
-          titleSpan.textContent = t.name + ' (' + cols.length + ' Spalten)';
+          const card = document.createElement('div');
+          card.className = 'template-card';
+
+          const info = document.createElement('div');
+          const name = document.createElement('div');
+          name.className = 'template-name';
+          name.textContent = t.name;
+          info.appendChild(name);
+          const colInfo = document.createElement('div');
+          colInfo.className = 'template-cols';
+          colInfo.textContent = cols.length + ' Spalten';
+          info.appendChild(colInfo);
+          card.appendChild(info);
+
           const btn = document.createElement('button');
+          btn.className = 'btn-small';
           btn.textContent = 'Verwenden';
-          btn.style.cssText = 'padding:4px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:12px;';
           btn.onclick = async (e) => {
             e.stopPropagation();
             const title = prompt('Board-Name:', t.name);
@@ -234,12 +496,13 @@
               window.location.href = '/board/' + board.id;
             }
           };
-          item.appendChild(titleSpan);
-          item.appendChild(btn);
-          list.appendChild(item);
+          card.appendChild(btn);
+          grid.appendChild(card);
         }
+        section.appendChild(grid);
       } catch {}
     }
+
     // Import board
     document.getElementById('importFile').addEventListener('change', async (e) => {
       const file = e.target.files[0];

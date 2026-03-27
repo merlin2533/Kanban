@@ -1,9 +1,10 @@
-const CACHE_NAME = 'kanban-v2';
+const CACHE_NAME = 'kanban-v3';
 const STATIC_ASSETS = [
   '/',
   '/board.html',
   '/login.html',
   '/settings.html',
+  '/admin.html',
   '/style.css',
   '/app.js',
   '/manifest.json',

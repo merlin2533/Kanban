@@ -318,13 +318,21 @@ function deleteBoardAccessLink(id) {
 }
 
 function getAllBoards() {
-  return db.prepare('SELECT id, title, created_at FROM boards ORDER BY created_at DESC').all();
+  return db.prepare(`
+    SELECT b.id, b.title, b.created_at,
+      (SELECT COUNT(*) FROM columns WHERE board_id = b.id) AS column_count,
+      (SELECT COUNT(*) FROM cards c JOIN columns col ON c.column_id = col.id WHERE col.board_id = b.id) AS card_count
+    FROM boards b ORDER BY b.created_at DESC
+  `).all();
 }
 
 function getBoardsForUser(userId) {
-  return db.prepare(
-    'SELECT b.id, b.title, b.created_at FROM boards b JOIN board_members bm ON b.id = bm.board_id WHERE bm.user_id = ? ORDER BY b.created_at DESC'
-  ).all(userId);
+  return db.prepare(`
+    SELECT b.id, b.title, b.created_at,
+      (SELECT COUNT(*) FROM columns WHERE board_id = b.id) AS column_count,
+      (SELECT COUNT(*) FROM cards c JOIN columns col ON c.column_id = col.id WHERE col.board_id = b.id) AS card_count
+    FROM boards b JOIN board_members bm ON b.id = bm.board_id WHERE bm.user_id = ? ORDER BY b.created_at DESC
+  `).all(userId);
 }
 
 function getBoardMembers(boardId) {
