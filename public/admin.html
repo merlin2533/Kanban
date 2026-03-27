@@ -337,6 +337,8 @@
         document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
         tab.classList.add('active');
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
+        if (tab.dataset.tab === 'access') loadBoardAccess();
+        else if (tab.dataset.tab === 'export') loadBoardDownloads();
       });
     });
 
@@ -418,6 +420,7 @@
         okEl.style.display = 'block';
         setTimeout(() => okEl.style.display = 'none', 3000);
         loadUsers();
+        loadBoardAccess();
       } else {
         const d = await res.json();
         errEl.textContent = d.error || 'Fehler beim Erstellen.';

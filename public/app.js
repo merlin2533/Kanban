@@ -1946,7 +1946,23 @@ async function togglePermissionsPanel() {
             </div>
           </div>
         `;
-        item.querySelector('[data-copy-url]').addEventListener('click', () => navigator.clipboard.writeText(url));
+        item.querySelector('[data-copy-url]').addEventListener('click', () => {
+          if (navigator.clipboard && window.isSecureContext) {
+            navigator.clipboard.writeText(url).catch(() => {
+              const ta = document.createElement('textarea');
+              ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+              document.body.appendChild(ta); ta.select();
+              try { document.execCommand('copy'); } catch {}
+              document.body.removeChild(ta);
+            });
+          } else {
+            const ta = document.createElement('textarea');
+            ta.value = url; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            document.body.appendChild(ta); ta.select();
+            try { document.execCommand('copy'); } catch {}
+            document.body.removeChild(ta);
+          }
+        });
 
         item.querySelector('[data-link-id]').onclick = async () => {
           try {
