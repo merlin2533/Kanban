@@ -2109,4 +2109,8 @@ async function addBoardMember() {
   } catch (e) { showError(e.message); }
 }
 
+// Expose functions used in inline onclick handlers to global scope
+window.addBoardMember = addBoardMember;
+window.createAccessLink = createAccessLink;
+
 } // end boardId guard
