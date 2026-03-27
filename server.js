@@ -73,6 +73,12 @@ function validString(val, max) {
   return t;
 }
 
+// --- Debug logging ---
+const DEBUG_AUTH = process.env.DEBUG_AUTH !== '0'; // enabled by default, set DEBUG_AUTH=0 to disable
+function authLog(...args) {
+  if (DEBUG_AUTH) console.log('[AUTH]', new Date().toISOString(), ...args);
+}
+
 // --- Cookie parsing ---
 function parseCookies(req) {
   const cookies = {};
@@ -87,32 +93,37 @@ function parseCookies(req) {
 
 // --- Auth middleware ---
 function authMiddleware(req, res, next) {
+  authLog(`middleware: ${req.method} ${req.originalUrl}`);
   const accessToken = req.query.token;
   if (accessToken) {
     const link = db.getBoardAccessLink(accessToken);
     if (link) {
+      authLog('middleware: access token valid, board:', link.board_id);
       req.accessLink = link;
       req.permission = link.permission;
-      // Access token auth is URL-based (not cookie-based), so CSRF is N/A
       return next();
     }
+    authLog('middleware: access token invalid');
   }
   const cookies = parseCookies(req);
   const sessionId = cookies.kanban_session;
+  authLog('middleware: cookie present:', !!sessionId, sessionId ? `(${sessionId.substring(0, 8)}...)` : '');
   if (sessionId) {
     const session = db.getSession(sessionId);
+    authLog('middleware: session lookup result:', session ? `user=${session.username}` : 'NULL (expired or not found)');
     if (session) {
       req.user = { id: session.user_id, username: session.username, is_admin: session.is_admin, password_changed_at: session.password_changed_at };
       req.permission = 'admin';
-      // For state-changing requests, require a custom header (simple CSRF protection)
       if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
         if (!req.query.token && !req.headers['x-requested-with']) {
+          authLog('middleware: CSRF check failed - missing X-Requested-With');
           return res.status(403).json({ error: 'Missing X-Requested-With header' });
         }
       }
       return next();
     }
   }
+  authLog('middleware: 401 - no valid auth found. Cookie header:', req.headers.cookie ? 'present' : 'MISSING');
   return res.status(401).json({ error: 'Authentication required' });
 }
 
@@ -165,10 +176,12 @@ setInterval(() => {
 // --- Auth Routes ---
 app.post('/api/auth/login', loginRateLimit, (req, res) => {
   const { username, password } = req.body || {};
+  authLog('login: attempt for user:', username);
   if (!username || !password) return res.status(400).json({ error: 'Username and password required' });
   const ip = req.ip || req.connection.remoteAddress;
   const user = db.authenticateUser(username, password);
   if (!user) {
+    authLog('login: FAILED for user:', username, 'from IP:', ip);
     const attempts = loginAttempts.get(ip) || [];
     attempts.push(Date.now());
     loginAttempts.set(ip, attempts);
@@ -176,13 +189,17 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
   }
   const session = db.createSession(user.id);
   const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}${secure}`);
+  const cookieStr = `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}${secure}`;
+  authLog('login: SUCCESS user:', username, 'session:', session.id.substring(0, 8) + '...', 'secure flag:', !!secure, 'NODE_ENV:', process.env.NODE_ENV);
+  authLog('login: Set-Cookie:', cookieStr.replace(session.id, session.id.substring(0, 8) + '...'));
+  res.setHeader('Set-Cookie', cookieStr);
   const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
   res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 });
 });
 
 app.post('/api/auth/logout', (req, res) => {
   const cookies = parseCookies(req);
+  authLog('logout: session:', cookies.kanban_session ? cookies.kanban_session.substring(0, 8) + '...' : 'none');
   if (cookies.kanban_session) db.deleteSession(cookies.kanban_session);
   res.setHeader('Set-Cookie', 'kanban_session=; Path=/; HttpOnly; Max-Age=0');
   res.json({ ok: true });
@@ -191,9 +208,17 @@ app.post('/api/auth/logout', (req, res) => {
 app.get('/api/auth/me', (req, res) => {
   const cookies = parseCookies(req);
   const sessionId = cookies.kanban_session;
-  if (!sessionId) return res.status(401).json({ error: 'Not authenticated' });
+  authLog('me: cookie present:', !!sessionId, 'referer:', req.headers.referer || 'none');
+  if (!sessionId) {
+    authLog('me: → 401 (no cookie)');
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
   const session = db.getSession(sessionId);
-  if (!session) return res.status(401).json({ error: 'Session expired' });
+  if (!session) {
+    authLog('me: → 401 (session expired/not found)');
+    return res.status(401).json({ error: 'Session expired' });
+  }
+  authLog('me: → OK, user:', session.username);
   const pwAge = session.password_changed_at ? (Date.now() - new Date(session.password_changed_at + 'Z').getTime()) / 86400000 : 999;
   res.json({ user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
 });
@@ -202,9 +227,17 @@ app.get('/api/auth/me', (req, res) => {
 app.get('/api/auth/status', (req, res) => {
   const cookies = parseCookies(req);
   const sessionId = cookies.kanban_session;
-  if (!sessionId) return res.json({ authenticated: false });
+  authLog('status: cookie present:', !!sessionId, sessionId ? `(${sessionId.substring(0, 8)}...)` : '', 'referer:', req.headers.referer || 'none', 'cookie-header:', req.headers.cookie ? 'present' : 'MISSING');
+  if (!sessionId) {
+    authLog('status: → authenticated: false (no cookie)');
+    return res.json({ authenticated: false });
+  }
   const session = db.getSession(sessionId);
-  if (!session) return res.json({ authenticated: false });
+  if (!session) {
+    authLog('status: → authenticated: false (session expired/not found for', sessionId.substring(0, 8) + '...)');
+    return res.json({ authenticated: false });
+  }
+  authLog('status: → authenticated: true, user:', session.username);
   const pwAge = session.password_changed_at ? (Date.now() - new Date(session.password_changed_at + 'Z').getTime()) / 86400000 : 999;
   res.json({ authenticated: true, user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
 });
@@ -907,6 +940,9 @@ app.use((err, req, res, next) => {
 // --- Start ---
 const server = app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
+  console.log(`[AUTH] Debug auth logging: ENABLED (set DEBUG_AUTH=0 to disable)`);
+  console.log(`[AUTH] NODE_ENV=${process.env.NODE_ENV || '(not set)'}, Secure cookie flag: ${process.env.NODE_ENV === 'production' ? 'YES' : 'NO'}`);
+  console.log(`[AUTH] trust proxy: ${app.get('trust proxy') || 'not set'}`);
 });
 
 // Clean expired sessions hourly

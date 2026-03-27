@@ -35,40 +35,47 @@ let currentUser = null;
 let currentPermission = 'view';
 
 async function checkAuth() {
-  // Check for access token in URL
+  console.log('[AUTH] app.js checkAuth: starting for board:', boardId);
   const params = new URLSearchParams(window.location.search);
   const token = params.get('token');
 
   try {
     if (token) {
-      // Try session auth first, fall back to access token
+      console.log('[AUTH] app.js checkAuth: using access token');
       const res = await fetch(`/api/auth/me?token=${token}`);
       if (res.ok) {
         const data = await res.json();
         currentUser = data.user;
         currentPermission = 'admin';
+        console.log('[AUTH] app.js checkAuth: token auth OK, user:', currentUser.username);
       } else {
-        // Validate access token via a board API call
         const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
         if (boardRes.ok) {
           currentPermission = 'view';
           window._accessToken = token;
+          console.log('[AUTH] app.js checkAuth: board access token valid');
         } else {
+          console.warn('[AUTH] app.js checkAuth: token invalid, redirecting to login');
           window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
           return false;
         }
       }
     } else {
-      const data = await fetch('/api/auth/status').then(r => r.json());
+      const res = await fetch('/api/auth/status');
+      const data = await res.json();
+      console.log('[AUTH] app.js checkAuth: status response:', JSON.stringify(data));
       if (data.authenticated) {
         currentUser = data.user;
         currentPermission = 'admin';
+        console.log('[AUTH] app.js checkAuth: authenticated as', currentUser.username);
       } else {
+        console.warn('[AUTH] app.js checkAuth: NOT authenticated, redirecting to login');
         window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
         return false;
       }
     }
-  } catch {
+  } catch (err) {
+    console.error('[AUTH] app.js checkAuth: ERROR', err);
     window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
     return false;
   }
@@ -121,14 +128,18 @@ document.addEventListener('DOMContentLoaded', async () => {
   let sseErrorCount = 0;
   eventSource.onerror = () => {
     sseErrorCount++;
+    console.warn('[AUTH] app.js SSE error count:', sseErrorCount);
     // After multiple consecutive failures, check if session is still valid
     if (sseErrorCount >= 3) {
+      console.log('[AUTH] app.js SSE: checking auth after 3+ errors...');
       fetch('/api/auth/status').then(r => r.json()).then(data => {
+        console.log('[AUTH] app.js SSE auth check:', JSON.stringify(data));
         if (!data.authenticated) {
+          console.warn('[AUTH] app.js SSE: session lost, redirecting to login');
           eventSource.close();
           window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
         }
-      }).catch(() => {});
+      }).catch(err => { console.error('[AUTH] app.js SSE auth check error:', err); });
     }
   };
   eventSource.onopen = () => { sseErrorCount = 0; };
@@ -424,6 +435,7 @@ async function api(url, method = 'GET', body = null) {
   const res = await fetch(url, opts);
   if (!res.ok) {
     if (res.status === 401) {
+      console.warn('[AUTH] app.js api(): got 401 from', method, url, '- redirecting to login');
       window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
       return new Promise(() => {}); // never resolves, page is navigating away
     }

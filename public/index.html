@@ -114,10 +114,15 @@
     // Auth check
     let currentUser = null;
     async function checkAuth() {
+      console.log('[AUTH] index.html checkAuth: starting, cookies:', document.cookie || '(HttpOnly - not visible from JS)');
       try {
-        const data = await fetch('/api/auth/status').then(r => r.json());
+        const res = await fetch('/api/auth/status');
+        console.log('[AUTH] index.html checkAuth: /api/auth/status response status:', res.status);
+        const data = await res.json();
+        console.log('[AUTH] index.html checkAuth: response data:', JSON.stringify(data));
         if (data.authenticated) {
           currentUser = data.user;
+          console.log('[AUTH] index.html checkAuth: authenticated as', currentUser.username);
           // Show settings link and logout
           const nav = document.createElement('div');
           nav.style.cssText = 'position:fixed;top:12px;right:12px;display:flex;gap:8px;';
@@ -134,10 +139,12 @@
           document.body.appendChild(nav);
           return true;
         } else {
+          console.warn('[AUTH] index.html checkAuth: NOT authenticated, redirecting to login. Response:', JSON.stringify(data));
           window.location.href = '/login.html';
           return false;
         }
-      } catch {
+      } catch (err) {
+        console.error('[AUTH] index.html checkAuth: ERROR', err);
         window.location.href = '/login.html';
         return false;
       }

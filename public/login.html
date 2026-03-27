@@ -88,13 +88,18 @@
   </div>
   <script>
     // Check if already logged in (uses /status so no 401 appears in the console)
+    console.log('[AUTH] login.html: checking if already logged in...');
     fetch('/api/auth/status').then(r => r.json()).then(data => {
+      console.log('[AUTH] login.html: status check result:', JSON.stringify(data));
       if (data.authenticated) {
         let redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
         if (!redirect.startsWith('/') || redirect.startsWith('//')) redirect = '/';
+        console.log('[AUTH] login.html: already authenticated, redirecting to:', redirect);
         window.location.href = redirect;
+      } else {
+        console.log('[AUTH] login.html: not authenticated, showing login form');
       }
-    }).catch(() => {});
+    }).catch(err => { console.error('[AUTH] login.html: status check error:', err); });
 
     document.getElementById('loginForm').addEventListener('submit', async (e) => {
       e.preventDefault();
@@ -105,12 +110,15 @@
       const password = document.getElementById('password').value;
 
       try {
+        console.log('[AUTH] login.html: submitting login for user:', username);
         const res = await fetch('/api/auth/login', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ username, password })
         });
+        console.log('[AUTH] login.html: login response status:', res.status, 'Set-Cookie header visible:', res.headers.get('set-cookie'));
         const data = await res.json();
+        console.log('[AUTH] login.html: login response data:', JSON.stringify(data));
 
         if (!res.ok) {
           errorEl.textContent = data.error || 'Login fehlgeschlagen';
@@ -127,8 +135,13 @@
 
         let redirect = new URLSearchParams(window.location.search).get('redirect') || '/';
         if (!redirect.startsWith('/') || redirect.startsWith('//')) redirect = '/';
+        console.log('[AUTH] login.html: login successful, redirecting to:', redirect);
+        // Verify cookie was set by doing a quick status check before redirect
+        const verifyRes = await fetch('/api/auth/status').then(r => r.json());
+        console.log('[AUTH] login.html: post-login verify:', JSON.stringify(verifyRes));
         window.location.href = redirect;
       } catch (err) {
+        console.error('[AUTH] login.html: login error:', err);
         errorEl.textContent = 'Verbindungsfehler';
         errorEl.style.display = 'block';
       }
