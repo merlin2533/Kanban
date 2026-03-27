@@ -944,7 +944,7 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
   console.log(`[AUTH] Debug auth logging: ENABLED (set DEBUG_AUTH=0 to disable)`);
-  console.log(`[AUTH] NODE_ENV=${process.env.NODE_ENV || '(not set)'}, Secure cookie flag: ${process.env.NODE_ENV === 'production' ? 'YES' : 'NO'}`);
+  console.log(`[AUTH] NODE_ENV=${process.env.NODE_ENV || '(not set)'}, Secure cookie: dynamic (only when actual HTTPS detected)`);
   console.log(`[AUTH] trust proxy: ${app.get('trust proxy') || 'not set'}`);
 });
 
