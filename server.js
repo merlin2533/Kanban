@@ -14,6 +14,8 @@ const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
 // --- Middleware ---
+// Trust proxy headers (X-Forwarded-Proto etc.) when behind reverse proxy
+app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(uploadsDir));
@@ -188,9 +190,10 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
     return res.status(401).json({ error: 'Invalid credentials' });
   }
   const session = db.createSession(user.id);
-  const secure = process.env.NODE_ENV === 'production' ? '; Secure' : '';
+  const isHttps = req.secure || req.headers['x-forwarded-proto'] === 'https';
+  const secure = isHttps ? '; Secure' : '';
   const cookieStr = `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}${secure}`;
-  authLog('login: SUCCESS user:', username, 'session:', session.id.substring(0, 8) + '...', 'secure flag:', !!secure, 'NODE_ENV:', process.env.NODE_ENV);
+  authLog('login: SUCCESS user:', username, 'session:', session.id.substring(0, 8) + '...', 'isHttps:', isHttps, 'secure flag:', !!secure, 'NODE_ENV:', process.env.NODE_ENV);
   authLog('login: Set-Cookie:', cookieStr.replace(session.id, session.id.substring(0, 8) + '...'));
   res.setHeader('Set-Cookie', cookieStr);
   const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
@@ -941,7 +944,7 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, () => {
   console.log(`Kanban board running at http://localhost:${PORT}`);
   console.log(`[AUTH] Debug auth logging: ENABLED (set DEBUG_AUTH=0 to disable)`);
-  console.log(`[AUTH] NODE_ENV=${process.env.NODE_ENV || '(not set)'}, Secure cookie flag: ${process.env.NODE_ENV === 'production' ? 'YES' : 'NO'}`);
+  console.log(`[AUTH] NODE_ENV=${process.env.NODE_ENV || '(not set)'}, Secure cookie: dynamic (only when actual HTTPS detected)`);
   console.log(`[AUTH] trust proxy: ${app.get('trust proxy') || 'not set'}`);
 });
 
