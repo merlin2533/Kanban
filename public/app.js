@@ -35,6 +35,9 @@ async function performUndo() {
 let currentUser = null;
 let currentPermission = 'view';
 let guestName = ''; // For access-link users
+// For named access-link tokens, track which board they belong to so we can
+// restore the token if the user switches back to that board.
+let _accessTokenBoardId = null;
 
 function getGuestName() {
   return guestName || localStorage.getItem('kanban_guest_name') || '';
@@ -94,6 +97,7 @@ async function checkAuth() {
         const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
         if (boardRes.ok) {
           window._accessToken = token;
+          _accessTokenBoardId = boardId;
           // Permission is enforced server-side; enable edit UI
           // (server rejects writes if link is view-only)
           currentPermission = 'edit';
@@ -2473,9 +2477,10 @@ async function setupBoardSwitcher() {
     switcher.onchange = () => {
       const newBoardId = switcher.value;
       if (newBoardId === boardId) return;
-      // For non-authenticated users the token is board-specific; navigate without it
-      // so the destination board can authenticate via its own public-info
-      window.location.href = '/board/' + newBoardId;
+      // If navigating back to the board this named token belongs to, preserve
+      // the token so the user doesn't lose access to a private board.
+      const preserveToken = window._accessToken && _accessTokenBoardId && newBoardId === _accessTokenBoardId;
+      window.location.href = '/board/' + newBoardId + (preserveToken ? '?token=' + encodeURIComponent(window._accessToken) : '');
     };
 
     // Insert after the home link, before boardTitle

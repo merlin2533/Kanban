@@ -470,13 +470,24 @@ app.get('/api/boards', authMiddleware, (req, res) => {
     const boards = req.user.is_admin ? db.getAllBoards() : db.getBoardsForUser(req.user.id);
     res.json(boards);
   } else if (req.accessLink) {
+    // Always include public boards so guests can switch between them.
+    // For named (non-pub_) links, also include the token's own board in case
+    // it isn't publicly listed.
+    const publicBoards = db.getPublicBoards();
     if (req.accessLink.id.startsWith('pub_')) {
-      // Public board users can see all boards that have public access enabled
-      res.json(db.getPublicBoards());
+      res.json(publicBoards);
     } else {
-      // Named access link: only the one board the link was created for
-      const board = db.getBoard(req.accessLink.board_id);
-      res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
+      const tokenBoard = db.getBoard(req.accessLink.board_id);
+      // Merge token board + public boards, deduplicating by id
+      const seen = new Set();
+      const result = [];
+      for (const b of (tokenBoard ? [tokenBoard] : []).concat(publicBoards)) {
+        if (!seen.has(b.id)) {
+          seen.add(b.id);
+          result.push({ id: b.id, title: b.title, created_at: b.created_at });
+        }
+      }
+      res.json(result);
     }
   } else {
     res.json([]);
