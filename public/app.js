@@ -2,6 +2,7 @@
 let boardId = window.location.pathname.split('/board/')[1];
 let board = null;
 let currentCardId = null;
+const modifiedCards = new Set();
 
 // --- Undo Stack ---
 const undoStack = [];
@@ -180,7 +181,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   }
 
   // SSE real-time sync with auto-reconnection
-  const modifiedCards = new Set();
   let sseDebounceTimer = null;
 
   function buildSseUrl() {
