@@ -175,6 +175,32 @@ setInterval(() => {
   }
 }, 60000);
 
+// --- General mutation rate limiting ---
+const mutationAttempts = new Map();
+function mutationRateLimit(maxPerMinute) {
+  return (req, res, next) => {
+    const key = (req.user ? 'u:' + req.user.id : 'ip:' + (req.ip || req.connection.remoteAddress));
+    const now = Date.now();
+    const attempts = mutationAttempts.get(key) || [];
+    const recent = attempts.filter(t => now - t < 60000);
+    if (recent.length >= maxPerMinute) {
+      return res.status(429).json({ error: 'Zu viele Anfragen. Bitte warte einen Moment.' });
+    }
+    recent.push(now);
+    mutationAttempts.set(key, recent);
+    next();
+  };
+}
+// Clean mutation rate limit map periodically
+setInterval(() => {
+  const now = Date.now();
+  for (const [key, attempts] of mutationAttempts) {
+    const recent = attempts.filter(t => now - t < 60000);
+    if (recent.length === 0) mutationAttempts.delete(key);
+    else mutationAttempts.set(key, recent);
+  }
+}, 60000);
+
 // --- Auth Routes ---
 app.post('/api/auth/login', loginRateLimit, (req, res) => {
   const { username, password } = req.body || {};
@@ -559,7 +585,7 @@ function getRequestUser(req) {
 }
 
 // --- Cards ---
-app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, mutationRateLimit(60), (req, res) => {
   const columnId = validId(req.params.columnId);
   if (!columnId) return res.status(400).json({ error: 'Invalid ID' });
   let text = req.body.text;
@@ -713,7 +739,7 @@ app.get('/api/cards/:cardId/comments', authMiddleware, (req, res) => {
   res.json(db.getComments(id));
 });
 
-app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRateLimit(100), (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const text = validString(req.body.text, 5000);
@@ -724,6 +750,18 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, (req, res) 
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created', cardId: id, user: author });
   res.status(201).json(comment);
+});
+
+app.patch('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.commentId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const text = validString(req.body.text, 5000);
+  if (!text) return res.status(400).json({ error: 'text required' });
+  const comment = db.updateComment(id, text);
+  if (!comment) return res.status(404).json({ error: 'Comment not found' });
+  const boardId = db.getCardBoardId(comment.card_id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'comment_updated', cardId: comment.card_id, user: getRequestUser(req) });
+  res.json(comment);
 });
 
 app.delete('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) => {
@@ -790,7 +828,7 @@ app.delete('/api/cards/:cardId/labels/:labelId', authMiddleware, requireEdit, (r
 });
 
 // --- Attachments ---
-app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, uploadSingle, (req, res) => {
+app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, mutationRateLimit(15), uploadSingle, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -944,7 +982,8 @@ app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
   const rawLimit = Number(req.query.limit) || 50;
   const limit = Math.min(rawLimit, 200);
-  res.json(db.getActivity(id, limit));
+  const offset = Math.max(0, Number(req.query.offset) || 0);
+  res.json(db.getActivity(id, limit, offset));
 });
 
 // --- Global error handler ---

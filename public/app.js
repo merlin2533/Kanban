@@ -179,56 +179,84 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('header').insertBefore(userBadge, document.querySelector('.header-actions'));
   }
 
-  // SSE real-time sync
-  let sseParams = [];
-  if (window._accessToken) sseParams.push('token=' + window._accessToken);
-  const guest = getGuestName();
-  if (guest && !currentUser) sseParams.push('guest=' + encodeURIComponent(guest));
-  const sseUrl = `/api/boards/${boardId}/events` + (sseParams.length ? '?' + sseParams.join('&') : '');
-  const eventSource = new EventSource(sseUrl);
-  let sseDebounceTimer = null;
-  // Track cards modified by others for activity highlighting
+  // SSE real-time sync with auto-reconnection
   const modifiedCards = new Set();
-  eventSource.onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    if (event.type === 'presence') {
-      renderPresence(event.users || []);
-      return;
-    }
-    if (event.type === 'update') {
-      // Track which cards were modified by other users
-      if (event.cardId && event.user && event.user !== getCurrentUsername()) {
-        modifiedCards.add(Number(event.cardId));
+  let sseDebounceTimer = null;
+
+  function buildSseUrl() {
+    const params = [];
+    if (window._accessToken) params.push('token=' + window._accessToken);
+    const guest = getGuestName();
+    if (guest && !currentUser) params.push('guest=' + encodeURIComponent(guest));
+    return `/api/boards/${boardId}/events` + (params.length ? '?' + params.join('&') : '');
+  }
+
+  function setupSSE() {
+    let sseErrorCount = 0;
+    let reconnectDelay = 2000;
+    const MAX_RECONNECT_DELAY = 30000;
+    let es = new EventSource(buildSseUrl());
+
+    es.onmessage = (e) => {
+      const event = JSON.parse(e.data);
+      if (event.type === 'presence') {
+        renderPresence(event.users || []);
+        return;
       }
-      clearTimeout(sseDebounceTimer);
-      sseDebounceTimer = setTimeout(() => {
-        // Don't reload while modal is open - queue it
-        if (currentCardId) {
-          window._pendingBoardReload = true;
-        } else {
-          loadBoard();
+      if (event.type === 'update') {
+        // Track which cards were modified by other users
+        if (event.cardId && event.user && event.user !== getCurrentUsername()) {
+          modifiedCards.add(Number(event.cardId));
         }
-      }, 500);
-    }
-  };
-  let sseErrorCount = 0;
-  eventSource.onerror = () => {
-    sseErrorCount++;
-    console.warn('[AUTH] app.js SSE error count:', sseErrorCount);
-    // After multiple consecutive failures, check if session is still valid
-    if (sseErrorCount >= 3) {
-      console.log('[AUTH] app.js SSE: checking auth after 3+ errors...');
-      fetch('/api/auth/status').then(r => r.json()).then(data => {
-        console.log('[AUTH] app.js SSE auth check:', JSON.stringify(data));
-        if (!data.authenticated) {
-          console.warn('[AUTH] app.js SSE: session lost, redirecting to login');
-          eventSource.close();
-          window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
-        }
-      }).catch(err => { console.error('[AUTH] app.js SSE auth check error:', err); });
-    }
-  };
-  eventSource.onopen = () => { sseErrorCount = 0; };
+        clearTimeout(sseDebounceTimer);
+        sseDebounceTimer = setTimeout(() => {
+          if (currentCardId) {
+            window._pendingBoardReload = true;
+          } else {
+            loadBoard();
+          }
+        }, 500);
+      }
+    };
+
+    es.onerror = () => {
+      sseErrorCount++;
+      console.warn('[SSE] error count:', sseErrorCount, 'next retry in', reconnectDelay + 'ms');
+      es.close();
+
+      if (sseErrorCount >= 5) {
+        // Check if session is still valid before reconnecting
+        fetch('/api/auth/status').then(r => r.json()).then(data => {
+          if (!data.authenticated && !window._accessToken) {
+            window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+            return;
+          }
+          scheduleReconnect();
+        }).catch(() => scheduleReconnect());
+      } else {
+        scheduleReconnect();
+      }
+
+      function scheduleReconnect() {
+        setTimeout(() => {
+          console.log('[SSE] reconnecting...');
+          es = null;
+          setupSSE();
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
+      }
+    };
+
+    es.onopen = () => {
+      sseErrorCount = 0;
+      reconnectDelay = 2000;
+      console.log('[SSE] connected');
+    };
+
+    window._eventSource = es;
+  }
+
+  setupSSE();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('/sw.js');
@@ -1792,7 +1820,8 @@ async function toggleActivity() {
   }
 
   try {
-    const activities = await api(`/api/boards/${boardId}/activity`);
+    const ACTIVITY_PAGE_SIZE = 50;
+    const activities = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}`);
     const list = document.getElementById('activityList');
     list.innerHTML = '';
 
@@ -1803,26 +1832,36 @@ async function toggleActivity() {
     if (activities.length === 0) {
       list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
     } else {
-      for (const act of activities) {
-        const item = document.createElement('div');
-        item.className = 'activity-item';
-        if (lastVisit && act.created_at > lastVisit) {
-          item.classList.add('new');
-        }
+      renderActivityItems(list, activities, lastVisit);
 
-        const details = JSON.parse(act.details || '{}');
-        const actionText = formatAction(act.action, details);
-
-        const actionDiv = document.createElement('div');
-        actionDiv.className = 'activity-action';
-        actionDiv.innerHTML = actionText; // actionText is already escaped via esc()
-        const timeDiv = document.createElement('div');
-        timeDiv.className = 'activity-time';
-        timeDiv.textContent = formatTime(act.created_at); // textContent, safe
-        item.appendChild(actionDiv);
-        item.appendChild(timeDiv);
-
-        list.appendChild(item);
+      // Load more button if we got a full page
+      if (activities.length >= ACTIVITY_PAGE_SIZE) {
+        const loadMoreBtn = document.createElement('button');
+        loadMoreBtn.className = 'load-more-btn';
+        loadMoreBtn.textContent = 'Mehr laden...';
+        let offset = ACTIVITY_PAGE_SIZE;
+        loadMoreBtn.onclick = async () => {
+          loadMoreBtn.disabled = true;
+          loadMoreBtn.textContent = '...';
+          try {
+            const more = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}&offset=${offset}`);
+            if (more.length > 0) {
+              renderActivityItems(list, more, lastVisit);
+              offset += more.length;
+            }
+            if (more.length < ACTIVITY_PAGE_SIZE) {
+              loadMoreBtn.remove();
+            } else {
+              loadMoreBtn.disabled = false;
+              loadMoreBtn.textContent = 'Mehr laden...';
+            }
+          } catch (e) {
+            showError(e.message);
+            loadMoreBtn.disabled = false;
+            loadMoreBtn.textContent = 'Mehr laden...';
+          }
+        };
+        list.appendChild(loadMoreBtn);
       }
     }
 
@@ -1832,12 +1871,42 @@ async function toggleActivity() {
   }
 }
 
+function renderActivityItems(list, activities, lastVisit) {
+  for (const act of activities) {
+    const item = document.createElement('div');
+    item.className = 'activity-item';
+    if (lastVisit && act.created_at > lastVisit) {
+      item.classList.add('new');
+    }
+
+    const details = JSON.parse(act.details || '{}');
+    const actionText = formatAction(act.action, details);
+
+    const actionDiv = document.createElement('div');
+    actionDiv.className = 'activity-action';
+    actionDiv.innerHTML = actionText;
+    const timeDiv = document.createElement('div');
+    timeDiv.className = 'activity-time';
+    timeDiv.textContent = formatTime(act.created_at);
+    item.appendChild(actionDiv);
+    item.appendChild(timeDiv);
+
+    // Insert before the load-more button if it exists
+    const loadMoreBtn = list.querySelector('.load-more-btn');
+    if (loadMoreBtn) {
+      list.insertBefore(item, loadMoreBtn);
+    } else {
+      list.appendChild(item);
+    }
+  }
+}
+
 async function checkNewActivity() {
   const lastVisit = localStorage.getItem('lastVisit_' + boardId);
   if (!lastVisit) return;
 
   try {
-    const activities = await api(`/api/boards/${boardId}/activity`);
+    const activities = await api(`/api/boards/${boardId}/activity?limit=50`);
     const newCount = activities.filter(a => a.created_at > lastVisit).length;
 
     const badge = document.getElementById('activityBadge');
@@ -1932,6 +2001,49 @@ function renderComments(comments) {
     time.className = 'comment-time';
     time.textContent = formatTime(comment.created_at);
 
+    const actions = document.createElement('span');
+    actions.className = 'comment-actions';
+
+    // Edit button
+    if (canEdit()) {
+      const edit = document.createElement('button');
+      edit.className = 'comment-edit';
+      edit.innerHTML = '&#9998;';
+      edit.title = 'Bearbeiten';
+      edit.onclick = () => {
+        // Replace text div with textarea for editing
+        const editArea = document.createElement('textarea');
+        editArea.className = 'comment-edit-area';
+        editArea.value = comment.text;
+        editArea.rows = 3;
+        text.replaceWith(editArea);
+        editArea.focus();
+
+        const saveRow = document.createElement('div');
+        saveRow.className = 'comment-edit-actions';
+        const saveBtn = document.createElement('button');
+        saveBtn.textContent = 'Speichern';
+        saveBtn.className = 'comment-save-btn';
+        saveBtn.onclick = async () => {
+          const newText = editArea.value.trim();
+          if (!newText) return;
+          try {
+            await api(`/api/comments/${comment.id}`, 'PATCH', { text: newText });
+            reloadComments();
+          } catch (e) { showError(e.message); }
+        };
+        const cancelBtn = document.createElement('button');
+        cancelBtn.textContent = 'Abbrechen';
+        cancelBtn.className = 'comment-cancel-btn';
+        cancelBtn.onclick = () => reloadComments();
+        saveRow.appendChild(saveBtn);
+        saveRow.appendChild(cancelBtn);
+        editArea.insertAdjacentElement('afterend', saveRow);
+      };
+      actions.appendChild(edit);
+    }
+
+    // Delete button
     const del = document.createElement('button');
     del.className = 'comment-delete';
     del.innerHTML = '&times;';
@@ -1941,9 +2053,10 @@ function renderComments(comments) {
         reloadComments();
       } catch (e) { showError(e.message); }
     };
+    actions.appendChild(del);
 
     footer.appendChild(time);
-    footer.appendChild(del);
+    footer.appendChild(actions);
     item.appendChild(text);
     item.appendChild(footer);
     container.appendChild(item);

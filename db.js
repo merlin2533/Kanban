@@ -86,10 +86,13 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_checklist_card_id ON checklist_items(card_id);
   CREATE INDEX IF NOT EXISTS idx_attachments_card_id ON attachments(card_id);
   CREATE INDEX IF NOT EXISTS idx_activity_board_id ON activity_log(board_id);
+  CREATE INDEX IF NOT EXISTS idx_activity_created_at ON activity_log(created_at);
   CREATE INDEX IF NOT EXISTS idx_labels_board_id ON labels(board_id);
   CREATE INDEX IF NOT EXISTS idx_card_labels_card_id ON card_labels(card_id);
   CREATE INDEX IF NOT EXISTS idx_card_labels_label_id ON card_labels(label_id);
   CREATE INDEX IF NOT EXISTS idx_comments_card_id ON comments(card_id);
+  CREATE INDEX IF NOT EXISTS idx_comments_created_at ON comments(created_at);
+  CREATE INDEX IF NOT EXISTS idx_cards_updated_at ON cards(updated_at);
 
   CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -117,6 +120,7 @@ db.exec(`
   );
 
   CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
+  CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_board_access_board_id ON board_access_links(board_id);
 
   CREATE TABLE IF NOT EXISTS card_assignees (
@@ -191,6 +195,8 @@ try {
 } catch {
   db.exec("ALTER TABLE cards ADD COLUMN archived INTEGER DEFAULT 0");
 }
+// Index on archived (runs after migration ensures column exists)
+try { db.exec("CREATE INDEX IF NOT EXISTS idx_cards_archived ON cards(archived)"); } catch {}
 
 // Migration: add wip_limit column if missing
 try {
@@ -876,6 +882,13 @@ function createComment(cardId, text, author) {
   return db.prepare('SELECT * FROM comments WHERE id = ?').get(result.lastInsertRowid);
 }
 
+function updateComment(id, text) {
+  const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(id);
+  if (!comment) return null;
+  db.prepare('UPDATE comments SET text = ? WHERE id = ?').run(text, id);
+  return db.prepare('SELECT * FROM comments WHERE id = ?').get(id);
+}
+
 function deleteComment(id) {
   const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(id);
   if (comment) db.prepare('DELETE FROM comments WHERE id = ?').run(id);
@@ -884,10 +897,11 @@ function deleteComment(id) {
 
 // --- Activity ---
 
-// Fix #11: cap limit to max 500
-function getActivity(boardId, limit = 50) {
+// Fix #11: cap limit to max 500, support offset for pagination
+function getActivity(boardId, limit = 50, offset = 0) {
   limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
-  return db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ?').all(boardId, limit);
+  offset = Math.max(0, parseInt(offset) || 0);
+  return db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(boardId, limit, offset);
 }
 
 // --- Export/Import ---
@@ -1036,7 +1050,7 @@ module.exports = {
   // Archive
   archiveCard, restoreCard, getArchivedCards,
   // Comments
-  getComments, createComment, deleteComment,
+  getComments, createComment, updateComment, deleteComment,
   // Export/Import
   exportBoard, importBoard,
   // Auth
