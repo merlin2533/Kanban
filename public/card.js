@@ -160,10 +160,42 @@ function renderMarkdown(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
+    .replace(/!\[([^\]]*)\]\((\/uploads\/[^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">')
     .replace(/\[(.+?)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
     .replace(/\n/g, '<br>');
+}
+
+// --- Image paste helpers ---
+function insertAtCursor(textarea, text) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  textarea.value = textarea.value.substring(0, start) + text + textarea.value.substring(end);
+  textarea.selectionStart = textarea.selectionEnd = start + text.length;
+}
+
+async function handleImagePaste(e, textarea, afterUpload) {
+  const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
+  const imageItem = items.find(item => item.type.startsWith('image/'));
+  if (!imageItem) return;
+  e.preventDefault();
+  const file = imageItem.getAsFile();
+  if (!file) return;
+  const placeholder = '![Bild wird hochgeladen...]()';
+  insertAtCursor(textarea, placeholder);
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
+    const md = `![${att.filename}](/uploads/${att.filepath})`;
+    textarea.value = textarea.value.replace(placeholder, md);
+    textarea.dispatchEvent(new Event('input'));
+    if (afterUpload) await afterUpload();
+  } catch (err) {
+    textarea.value = textarea.value.replace(placeholder, '');
+    showError('Bild-Upload fehlgeschlagen: ' + err.message);
+  }
 }
 
 // --- Load card data ---
@@ -361,6 +393,7 @@ function renderComments(comments) {
         editArea.value = comment.text;
         editArea.rows = 3;
         text.replaceWith(editArea);
+        editArea.addEventListener('paste', (e) => handleImagePaste(e, editArea));
         editArea.focus();
         const saveRow = document.createElement('div');
         saveRow.className = 'comment-edit-actions';
@@ -914,6 +947,12 @@ function setupEvents() {
     } catch (e) { showError(e.message); }
   };
 
+  // Image paste for description
+  descArea.addEventListener('paste', (e) => handleImagePaste(e, descArea, async () => {
+    await api(`/api/cards/${cardId}`, 'PATCH', { description: descArea.value });
+    card.description = descArea.value;
+  }));
+
   // Due date
   document.getElementById('cardDueDate').onchange = async (e) => {
     try {
@@ -1012,9 +1051,11 @@ function setupEvents() {
 
   // Comments
   document.getElementById('addCommentBtn').onclick = addComment;
-  document.getElementById('commentInput').onkeydown = (e) => {
+  const commentInput = document.getElementById('commentInput');
+  commentInput.onkeydown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }
   };
+  commentInput.addEventListener('paste', (e) => handleImagePaste(e, commentInput));
 
   // Duplicate
   document.getElementById('duplicateCardBtn').onclick = duplicateCard;
