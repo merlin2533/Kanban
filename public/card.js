@@ -75,8 +75,21 @@ async function checkAuth() {
         currentUser = data.user;
         currentPermission = 'admin';
       } else {
-        window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
-        return false;
+        const pubRes = await fetch(`/api/boards/${boardId}/public-info`);
+        if (pubRes.ok) {
+          const pubData = await pubRes.json();
+          if (pubData.public_access) {
+            window._accessToken = pubData.token;
+            currentPermission = pubData.public_access;
+            await promptGuestName();
+          } else {
+            window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+            return false;
+          }
+        } else {
+          window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+          return false;
+        }
       }
     }
   } catch (err) {
@@ -226,7 +239,7 @@ async function loadCard() {
 function renderCardPage() {
   document.title = card.text + ' – Kanban';
   document.getElementById('boardTitle').textContent = board.title || '';
-  document.getElementById('backLink').href = `/board/${boardId}`;
+  document.getElementById('backLink').href = `/board/${boardId}` + (window._accessToken ? `?token=${window._accessToken}` : '');
 
   // Title
   const titleInput = document.getElementById('cardTitle');
@@ -1028,7 +1041,7 @@ function setupEvents() {
   document.getElementById('archiveCardBtn').onclick = () => withLoading(document.getElementById('archiveCardBtn'), async () => {
     try {
       await api(`/api/cards/${cardId}/archive`, 'PUT');
-      window.location.href = `/board/${boardId}`;
+      window.location.href = `/board/${boardId}` + (window._accessToken ? `?token=${window._accessToken}` : '');
     } catch (e) { showError(e.message); }
   });
 
@@ -1036,7 +1049,7 @@ function setupEvents() {
   document.getElementById('restoreCardBtn').onclick = () => withLoading(document.getElementById('restoreCardBtn'), async () => {
     try {
       await api(`/api/cards/${cardId}/restore`, 'PUT');
-      window.location.href = `/board/${boardId}`;
+      window.location.href = `/board/${boardId}` + (window._accessToken ? `?token=${window._accessToken}` : '');
     } catch (e) { showError(e.message); }
   });
 
@@ -1045,7 +1058,7 @@ function setupEvents() {
     if (!confirm('Karte wirklich löschen?')) return;
     try {
       await api(`/api/cards/${cardId}`, 'DELETE');
-      window.location.href = `/board/${boardId}`;
+      window.location.href = `/board/${boardId}` + (window._accessToken ? `?token=${window._accessToken}` : '');
     } catch (e) { showError(e.message); }
   });
 
