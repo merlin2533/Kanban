@@ -242,6 +242,28 @@
       .btn-download:hover { background: #14532d; }
       .btn-danger { background: #3b1c1c; color: #f87171; }
     }
+
+    /* Settings */
+    .settings-group { margin-bottom: 20px; }
+    .settings-group label { display: block; font-size: 13px; font-weight: 500; color: #475569; margin-bottom: 6px; }
+    .settings-group .hint { font-size: 12px; color: #94a3b8; margin-top: 4px; }
+    .api-key-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .api-key-display {
+      font-family: monospace; font-size: 12px; background: #f8fafc;
+      border: 1px solid #e2e8f0; border-radius: 8px; padding: 8px 12px;
+      flex: 1; word-break: break-all; color: #1e293b; min-width: 0;
+    }
+    .btn-secondary {
+      padding: 8px 14px; background: #f1f5f9; color: #475569; border: 1px solid #e2e8f0;
+      border-radius: 8px; font-size: 13px; font-weight: 500; cursor: pointer; white-space: nowrap;
+    }
+    .btn-secondary:hover { background: #e2e8f0; }
+    @media (prefers-color-scheme: dark) {
+      .settings-group label { color: #94a3b8; }
+      .api-key-display { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+      .btn-secondary { background: #334155; color: #cbd5e1; border-color: #475569; }
+      .btn-secondary:hover { background: #475569; }
+    }
   </style>
 </head>
 <body>
@@ -267,6 +289,7 @@
       <button class="tab active" data-tab="users">Benutzer</button>
       <button class="tab" data-tab="access">Board-Zugriff</button>
       <button class="tab" data-tab="export">Daten & Export</button>
+      <button class="tab" data-tab="settings">Einstellungen</button>
     </div>
 
     <!-- Users tab -->
@@ -295,6 +318,59 @@
           Verwalte, welche Benutzer auf welche Boards zugreifen. Admins haben immer Zugriff.
         </p>
         <div id="boardAccessList"></div>
+      </div>
+    </div>
+
+    <!-- Settings tab -->
+    <div class="tab-panel" id="tab-settings">
+      <div class="admin-card">
+        <h2>E-Mail (Resend)</h2>
+        <div class="settings-group">
+          <label for="sResendKey">Resend API Key</label>
+          <input type="password" class="form-input" id="sResendKey" placeholder="re_xxxxxxxxxxxxxxxxxxxxxxxx" autocomplete="off">
+          <div class="hint">Wird intern gespeichert. Nicht an externe Services gesendet.</div>
+        </div>
+        <div class="settings-group">
+          <label for="sEmailFrom">Absender-Adresse (EMAIL_FROM)</label>
+          <input type="email" class="form-input" id="sEmailFrom" placeholder="support@yourdomain.com">
+        </div>
+        <button class="btn-primary" id="saveEmailSettingsBtn">Speichern</button>
+        <div class="form-error" id="emailSettingsError"></div>
+        <div class="form-success" id="emailSettingsSuccess"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>Reminder</h2>
+        <div class="settings-group">
+          <label for="sReminderHours">Intervall (Stunden)</label>
+          <input type="number" class="form-input" id="sReminderHours" min="1" max="720" style="max-width:120px;">
+          <div class="hint">Wie oft werden Erinnerungen verschickt.</div>
+        </div>
+        <div class="settings-group">
+          <label for="sEscalationDays">Eskalation nach (Tage)</label>
+          <input type="number" class="form-input" id="sEscalationDays" min="1" max="365" style="max-width:120px;">
+          <div class="hint">Nach wie vielen Tagen ohne Reaktion wird eskaliert.</div>
+        </div>
+        <button class="btn-primary" id="saveReminderSettingsBtn">Speichern</button>
+        <div class="form-error" id="reminderSettingsError"></div>
+        <div class="form-success" id="reminderSettingsSuccess"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>Externer API-Key</h2>
+        <p style="color:#64748b;font-size:13px;margin-bottom:16px;">
+          Wird von externen Anwendungen genutzt, um Tickets per API zu erstellen.<br>
+          Endpunkt: <code style="font-size:12px;">POST /api/external/tickets</code> mit Header <code style="font-size:12px;">x-api-key: &lt;key&gt;</code>
+        </p>
+        <div class="settings-group">
+          <label>Aktueller API-Key</label>
+          <div class="api-key-row">
+            <span class="api-key-display" id="apiKeyDisplay">••••••••••••••••••••••••</span>
+            <button class="btn-secondary" id="toggleApiKeyBtn">Anzeigen</button>
+            <button class="btn-secondary" id="copyApiKeyBtn">Kopieren</button>
+            <button class="btn-danger" id="rotateApiKeyBtn">Neu generieren</button>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -327,6 +403,7 @@
         loadUsers();
         loadBoardAccess();
         loadBoardDownloads();
+        loadSettings();
       } catch { window.location.href = '/login.html'; }
     }
 
@@ -339,6 +416,7 @@
         document.getElementById('tab-' + tab.dataset.tab).classList.add('active');
         if (tab.dataset.tab === 'access') loadBoardAccess();
         else if (tab.dataset.tab === 'export') loadBoardDownloads();
+        else if (tab.dataset.tab === 'settings') loadSettings();
       });
     });
 
@@ -600,6 +678,85 @@
         a.remove();
         URL.revokeObjectURL(url);
       } catch (e) { alert('Backup fehlgeschlagen: ' + e.message); }
+    });
+
+    // --- Settings ---
+    let _apiKeyValue = '';
+    let _apiKeyVisible = false;
+
+    async function loadSettings() {
+      try {
+        const s = await fetch('/api/admin/settings').then(r => r.json());
+        document.getElementById('sResendKey').value = s.resend_api_key || '';
+        document.getElementById('sEmailFrom').value = s.email_from || '';
+        document.getElementById('sReminderHours').value = s.reminder_interval_hours || '24';
+        document.getElementById('sEscalationDays').value = s.reminder_escalation_days || '3';
+        _apiKeyValue = s.api_key || '';
+        _apiKeyVisible = false;
+        document.getElementById('apiKeyDisplay').textContent = '••••••••••••••••••••••••';
+        document.getElementById('toggleApiKeyBtn').textContent = 'Anzeigen';
+      } catch {}
+    }
+
+    document.getElementById('saveEmailSettingsBtn').addEventListener('click', async () => {
+      const errEl = document.getElementById('emailSettingsError');
+      const okEl = document.getElementById('emailSettingsSuccess');
+      errEl.style.display = 'none'; okEl.style.display = 'none';
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({
+          resend_api_key: document.getElementById('sResendKey').value,
+          email_from: document.getElementById('sEmailFrom').value,
+        })
+      });
+      if (res.ok) { okEl.textContent = 'Gespeichert!'; okEl.style.display = 'block'; setTimeout(() => okEl.style.display = 'none', 3000); }
+      else { errEl.textContent = 'Fehler beim Speichern.'; errEl.style.display = 'block'; }
+    });
+
+    document.getElementById('saveReminderSettingsBtn').addEventListener('click', async () => {
+      const errEl = document.getElementById('reminderSettingsError');
+      const okEl = document.getElementById('reminderSettingsSuccess');
+      errEl.style.display = 'none'; okEl.style.display = 'none';
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({
+          reminder_interval_hours: document.getElementById('sReminderHours').value,
+          reminder_escalation_days: document.getElementById('sEscalationDays').value,
+        })
+      });
+      if (res.ok) { okEl.textContent = 'Gespeichert!'; okEl.style.display = 'block'; setTimeout(() => okEl.style.display = 'none', 3000); }
+      else { errEl.textContent = 'Fehler beim Speichern.'; errEl.style.display = 'block'; }
+    });
+
+    document.getElementById('toggleApiKeyBtn').addEventListener('click', () => {
+      _apiKeyVisible = !_apiKeyVisible;
+      document.getElementById('apiKeyDisplay').textContent = _apiKeyVisible ? _apiKeyValue : '••••••••••••••••••••••••';
+      document.getElementById('toggleApiKeyBtn').textContent = _apiKeyVisible ? 'Verbergen' : 'Anzeigen';
+    });
+
+    document.getElementById('copyApiKeyBtn').addEventListener('click', () => {
+      if (!_apiKeyValue) return;
+      navigator.clipboard.writeText(_apiKeyValue).then(() => {
+        const btn = document.getElementById('copyApiKeyBtn');
+        btn.textContent = 'Kopiert!';
+        setTimeout(() => btn.textContent = 'Kopieren', 2000);
+      }).catch(() => {});
+    });
+
+    document.getElementById('rotateApiKeyBtn').addEventListener('click', async () => {
+      if (!confirm('Neuen API-Key generieren? Der alte Key wird sofort ungueltig.')) return;
+      const res = await fetch('/api/admin/settings/rotate-api-key', {
+        method: 'POST', headers: { 'X-Requested-With': 'kanban' }
+      });
+      if (res.ok) {
+        const d = await res.json();
+        _apiKeyValue = d.api_key;
+        _apiKeyVisible = true;
+        document.getElementById('apiKeyDisplay').textContent = _apiKeyValue;
+        document.getElementById('toggleApiKeyBtn').textContent = 'Verbergen';
+      }
     });
 
     // --- Logout ---

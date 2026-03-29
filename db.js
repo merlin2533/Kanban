@@ -155,6 +155,11 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_board_members_board_id ON board_members(board_id);
   CREATE INDEX IF NOT EXISTS idx_board_members_user_id ON board_members(user_id);
+
+  CREATE TABLE IF NOT EXISTS app_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT ''
+  );
 `);
 
 // Migration: populate board_members for existing boards/users (backward compatibility)
@@ -1025,6 +1030,26 @@ function saveBoardAsTemplate(boardId, name) {
   return createTemplate(name, JSON.stringify(columns));
 }
 
+// --- App Settings ---
+
+function getSetting(key) {
+  const row = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  return row ? row.value : null;
+}
+
+function setSetting(key, value) {
+  db.prepare('INSERT OR REPLACE INTO app_settings (key, value) VALUES (?, ?)').run(key, String(value ?? ''));
+}
+
+function initSetting(key, defaultValue) {
+  const existing = db.prepare('SELECT value FROM app_settings WHERE key = ?').get(key);
+  if (!existing) db.prepare('INSERT INTO app_settings (key, value) VALUES (?, ?)').run(key, String(defaultValue ?? ''));
+}
+
+function getAllSettings() {
+  return Object.fromEntries(db.prepare('SELECT key, value FROM app_settings').all().map(r => [r.key, r.value]));
+}
+
 // --- Raw DB access ---
 
 function getDb() { return db; }
@@ -1066,6 +1091,8 @@ module.exports = {
   createWebhook, getWebhooks, deleteWebhook, getActiveWebhooks,
   // Board Templates
   createTemplate, getTemplates, deleteTemplate, createBoardFromTemplate, saveBoardAsTemplate,
+  // App Settings
+  getSetting, setSetting, initSetting, getAllSettings,
   // Raw DB
   getDb,
 };

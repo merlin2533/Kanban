@@ -1,13 +1,73 @@
 # Docker Swarm Stack - Deploy with:
 #   docker stack deploy -c docker-stack.yml kanban
 #
-# Required secrets:
-#   echo "your-admin-password" | docker secret create kanban_admin_password -
-#
 # Configure via environment or .env file before deploy
 
 services:
-  kanban:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kanban}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    volumes:
+      - kanban-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      placement:
+        constraints:
+          - node.role == manager
+    networks:
+      - kanban-net
+
+  sgit_ticket:
+    image: ${SGIT_TICKET_IMAGE:-merlin2539/sgit_ticket:latest}
+    ports:
+      - target: 3000
+        published: ${SGIT_TICKET_PORT:-3200}
+        protocol: tcp
+        mode: ingress
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
+      - BASE_URL=${BASE_URL:-http://localhost:3200}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
+      - API_KEY=${API_KEY:-}
+      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
+      - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
+      - REMINDER_ESCALATION_DAYS=${REMINDER_ESCALATION_DAYS:-3}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      placement:
+        constraints:
+          - node.role == manager
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - kanban-net
+
+  app:
     image: ${IMAGE:-merlin2539/kanban:latest}
     ports:
       - target: 3000
@@ -15,15 +75,19 @@ services:
         protocol: tcp
         mode: ingress
     volumes:
-      - kanban-data:/data
       - kanban-uploads:/app/uploads
     environment:
-      - PORT=3000
-      - DB_PATH=/data/kanban.db
       - NODE_ENV=production
-      - BASE_URL=${BASE_URL:-http://localhost:3000}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
+      - BASE_URL=${APP_URL:-http://localhost:3000}
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
+      - API_KEY=${API_KEY:-}
+      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
+      - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
+      - REMINDER_ESCALATION_DAYS=${REMINDER_ESCALATION_DAYS:-3}
     deploy:
       replicas: 1
       restart_policy:
@@ -68,7 +132,7 @@ networks:
     driver: overlay
 
 volumes:
-  kanban-data:
+  kanban-db-data:
     driver: local
   kanban-uploads:
     driver: local
