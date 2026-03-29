@@ -62,6 +62,9 @@ self.addEventListener('fetch', (e) => {
     return;
   }
 
+  // Only cache http/https requests (chrome-extension:// etc. are unsupported)
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') return;
+
   // Static assets: network first, fallback to cache (avoids stale JS/HTML)
   e.respondWith(
     fetch(e.request).then(response => {
