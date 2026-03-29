@@ -265,6 +265,13 @@ try {
   db.exec("ALTER TABLE board_members ADD COLUMN role TEXT DEFAULT 'editor'");
 }
 
+// Migration: add public_access column to boards
+try {
+  db.prepare("SELECT public_access FROM boards LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE boards ADD COLUMN public_access TEXT DEFAULT NULL");
+}
+
 // Card templates table (per-board)
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_templates (
@@ -370,6 +377,27 @@ function deleteBoardAccessLink(id) {
   const link = db.prepare('SELECT * FROM board_access_links WHERE id = ?').get(id);
   if (link) db.prepare('DELETE FROM board_access_links WHERE id = ?').run(id);
   return link;
+}
+
+// --- Public board access ---
+
+function getBoardPublicAccess(boardId) {
+  const row = db.prepare('SELECT public_access FROM boards WHERE id = ?').get(boardId);
+  return row ? row.public_access : null;
+}
+
+function setBoardPublicAccess(boardId, permission) {
+  // permission: 'view', 'edit', or null to disable
+  const value = permission === 'edit' ? 'edit' : permission === 'view' ? 'view' : null;
+  db.prepare('UPDATE boards SET public_access = ? WHERE id = ?').run(value, boardId);
+  // Maintain synthetic access link with fixed ID 'pub_<boardId>'
+  const syntheticId = 'pub_' + boardId;
+  if (value) {
+    db.prepare('INSERT OR REPLACE INTO board_access_links (id, board_id, permission, label) VALUES (?, ?, ?, ?)').run(syntheticId, boardId, value, 'Öffentlicher Zugang');
+  } else {
+    db.prepare('DELETE FROM board_access_links WHERE id = ?').run(syntheticId);
+  }
+  return value;
 }
 
 function getAllBoards() {
@@ -1272,6 +1300,8 @@ module.exports = {
   createTemplate, getTemplates, deleteTemplate, createBoardFromTemplate, saveBoardAsTemplate,
   // App Settings
   getSetting, setSetting, initSetting, getAllSettings,
+  // Public board access
+  getBoardPublicAccess, setBoardPublicAccess,
   // Raw DB
   getDb,
 };
