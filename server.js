@@ -470,8 +470,14 @@ app.get('/api/boards', authMiddleware, (req, res) => {
     const boards = req.user.is_admin ? db.getAllBoards() : db.getBoardsForUser(req.user.id);
     res.json(boards);
   } else if (req.accessLink) {
-    const board = db.getBoard(req.accessLink.board_id);
-    res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
+    if (req.accessLink.id.startsWith('pub_')) {
+      // Public board users can see all boards that have public access enabled
+      res.json(db.getPublicBoards());
+    } else {
+      // Named access link: only the one board the link was created for
+      const board = db.getBoard(req.accessLink.board_id);
+      res.json(board ? [{ id: board.id, title: board.title, created_at: board.created_at }] : []);
+    }
   } else {
     res.json([]);
   }

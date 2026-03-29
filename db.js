@@ -409,6 +409,15 @@ function getAllBoards() {
   `).all();
 }
 
+function getPublicBoards() {
+  return db.prepare(`
+    SELECT b.id, b.title, b.created_at,
+      (SELECT COUNT(*) FROM columns WHERE board_id = b.id) AS column_count,
+      (SELECT COUNT(*) FROM cards c JOIN columns col ON c.column_id = col.id WHERE col.board_id = b.id) AS card_count
+    FROM boards b WHERE b.public_access IS NOT NULL ORDER BY b.created_at DESC
+  `).all();
+}
+
 function getBoardsForUser(userId) {
   return db.prepare(`
     SELECT b.id, b.title, b.created_at,
@@ -1291,7 +1300,7 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getAllBoards, getBoardsForUser, getUsers, deleteUser,
+  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, deleteUser,
   // Board members
   getBoardMembers, isBoardMember, addBoardMember, removeBoardMember,
   // Webhooks
