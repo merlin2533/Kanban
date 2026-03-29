@@ -9,6 +9,13 @@ const db = require('./db');
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
+// --- Initialise persisted app settings from env vars (first-run defaults) ---
+db.initSetting('resend_api_key',           process.env.RESEND_API_KEY           || '');
+db.initSetting('email_from',               process.env.EMAIL_FROM               || 'support@yourdomain.com');
+db.initSetting('reminder_interval_hours',  process.env.REMINDER_INTERVAL_HOURS  || '24');
+db.initSetting('reminder_escalation_days', process.env.REMINDER_ESCALATION_DAYS || '3');
+db.initSetting('api_key',                  process.env.API_KEY                  || require('crypto').randomBytes(24).toString('hex'));
+
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
@@ -984,6 +991,74 @@ app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   const limit = Math.min(rawLimit, 200);
   const offset = Math.max(0, Number(req.query.offset) || 0);
   res.json(db.getActivity(id, limit, offset));
+});
+
+// --- Admin: App Settings ---
+
+// GET /api/admin/settings  → returns all settings (api_key shown as masked except to admin)
+app.get('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
+  const s = db.getAllSettings();
+  res.json({
+    resend_api_key:           s.resend_api_key           || '',
+    email_from:               s.email_from               || '',
+    reminder_interval_hours:  s.reminder_interval_hours  || '24',
+    reminder_escalation_days: s.reminder_escalation_days || '3',
+    api_key:                  s.api_key                  || '',
+  });
+});
+
+// PUT /api/admin/settings  → update one or more settings
+app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
+  const allowed = ['resend_api_key', 'email_from', 'reminder_interval_hours', 'reminder_escalation_days'];
+  for (const key of allowed) {
+    if (req.body[key] !== undefined) db.setSetting(key, req.body[key]);
+  }
+  res.json({ ok: true });
+});
+
+// POST /api/admin/settings/rotate-api-key  → generate a new API key and return it
+app.post('/api/admin/settings/rotate-api-key', authMiddleware, requireAdmin, (req, res) => {
+  const newKey = require('crypto').randomBytes(24).toString('hex');
+  db.setSetting('api_key', newKey);
+  res.json({ api_key: newKey });
+});
+
+// --- External API (authenticated by api_key) ---
+
+function apiKeyAuth(req, res, next) {
+  const key = req.headers['x-api-key'] || req.query.apiKey;
+  const stored = db.getSetting('api_key');
+  if (!stored || !key || key !== stored) {
+    return res.status(401).json({ error: 'Invalid or missing API key' });
+  }
+  next();
+}
+
+// POST /api/external/tickets  → create a card from an external application
+//   Body: { title, description?, board_id, column_id? }
+app.post('/api/external/tickets', apiKeyAuth, (req, res) => {
+  const title = validString(req.body.title, 500);
+  if (!title) return res.status(400).json({ error: 'title required (max 500 chars)' });
+
+  const boardId = req.body.board_id;
+  if (!boardId) return res.status(400).json({ error: 'board_id required' });
+
+  const board = db.getBoard(boardId);
+  if (!board) return res.status(404).json({ error: 'Board not found' });
+  if (!board.columns || board.columns.length === 0) return res.status(400).json({ error: 'Board has no columns' });
+
+  let column;
+  if (req.body.column_id) {
+    const colId = validId(req.body.column_id);
+    column = board.columns.find(c => c.id === colId);
+    if (!column) return res.status(404).json({ error: 'Column not found in this board' });
+  } else {
+    column = board.columns[0]; // default: first column
+  }
+
+  const description = typeof req.body.description === 'string' ? req.body.description.slice(0, 5000) : '';
+  const card = db.createCard(column.id, title, description);
+  res.status(201).json({ ok: true, card });
 });
 
 // --- Global error handler ---

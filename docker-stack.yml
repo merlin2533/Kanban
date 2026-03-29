@@ -1,9 +1,6 @@
 # Docker Swarm Stack - Deploy with:
 #   docker stack deploy -c docker-stack.yml kanban
 #
-# Required secrets:
-#   echo "your-admin-password" | docker secret create kanban_admin_password -
-#
 # Configure via environment or .env file before deploy
 
 services:
@@ -30,11 +27,51 @@ services:
     networks:
       - kanban-net
 
+  sgit_ticket:
+    image: ${SGIT_TICKET_IMAGE:-merlin2539/sgit_ticket:latest}
+    ports:
+      - target: 3000
+        published: ${SGIT_TICKET_PORT:-3200}
+        protocol: tcp
+        mode: ingress
+    environment:
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
+      - BASE_URL=${BASE_URL:-http://localhost:3200}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
+      - API_KEY=${API_KEY:-}
+      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
+      - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
+      - REMINDER_ESCALATION_DAYS=${REMINDER_ESCALATION_DAYS:-3}
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      placement:
+        constraints:
+          - node.role == manager
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks:
+      - kanban-net
+
   app:
     image: ${IMAGE:-merlin2539/kanban:latest}
     ports:
       - target: 3000
-        published: ${PORT:-3200}
+        published: ${PORT:-3000}
         protocol: tcp
         mode: ingress
     volumes:
@@ -42,16 +79,15 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
-      - BASE_URL=${BASE_URL:-http://localhost:3200}
+      - BASE_URL=${APP_URL:-http://localhost:3000}
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
-      - API_KEY=${API_KEY:-default-dev-api-key}
-      - CRON_SECRET=${CRON_SECRET:-default-cron-secret}
+      - API_KEY=${API_KEY:-}
+      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
       - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
       - REMINDER_ESCALATION_DAYS=${REMINDER_ESCALATION_DAYS:-3}
-      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
     deploy:
       replicas: 1
       restart_policy:
