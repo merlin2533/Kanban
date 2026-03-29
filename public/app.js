@@ -2456,6 +2456,8 @@ async function setupBoardSwitcher() {
   try {
     const boards = await api('/api/boards');
 
+    if (boards.length <= 1) return;
+
     const switcher = document.createElement('select');
     switcher.className = 'board-switcher';
     switcher.setAttribute('aria-label', 'Board wechseln');
@@ -2469,7 +2471,11 @@ async function setupBoardSwitcher() {
     }
 
     switcher.onchange = () => {
-      window.location.href = '/board/' + switcher.value;
+      const newBoardId = switcher.value;
+      if (newBoardId === boardId) return;
+      // For non-authenticated users the token is board-specific; navigate without it
+      // so the destination board can authenticate via its own public-info
+      window.location.href = '/board/' + newBoardId;
     };
 
     // Insert after the home link, before boardTitle
