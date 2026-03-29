@@ -866,9 +866,10 @@ function createColumnEl(col) {
   addInput.onkeydown = async (e) => {
     if (e.key === 'Enter' && addInput.value.trim()) {
       try {
-        await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
+        const newCard = await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
         addInput.value = '';
-        loadBoard();
+        const token = window._accessToken ? `?token=${window._accessToken}` : '';
+        window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
       } catch (e) {
         showError(e.message);
       }
@@ -1005,13 +1006,12 @@ function createCardEl(card) {
     div.style.borderLeft = `4px solid ${colors[card.priority] || 'transparent'}`;
   }
 
-  // Click to open modal
+  // Click to navigate to card page
   div.onclick = (e) => {
     if (e.target.closest('.card-thumbnail')) return;
-    // Dismiss activity highlight when card is opened
     modifiedCards.delete(card.id);
-    div.classList.remove('card-activity-highlight');
-    openCardModal(card);
+    const token = window._accessToken ? `?token=${window._accessToken}` : '';
+    window.location.href = `/board/${boardId}/card/${card.id}${token}`;
   };
 
   // Drag events

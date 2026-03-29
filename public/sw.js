@@ -1,12 +1,14 @@
-const CACHE_NAME = 'kanban-v3';
+const CACHE_NAME = 'kanban-v4';
 const STATIC_ASSETS = [
   '/',
   '/board.html',
+  '/card.html',
   '/login.html',
   '/settings.html',
   '/admin.html',
   '/style.css',
   '/app.js',
+  '/card.js',
   '/manifest.json',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
@@ -52,6 +54,7 @@ self.addEventListener('fetch', (e) => {
   if (e.request.mode === 'navigate') {
     e.respondWith(
       fetch(e.request).catch(() => {
+        if (/^\/board\/[^/]+\/card\//.test(url.pathname)) return caches.match('/card.html');
         if (url.pathname.startsWith('/board/')) return caches.match('/board.html');
         return caches.match(url.pathname) || caches.match('/');
       })

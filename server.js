@@ -431,6 +431,11 @@ app.get('/board/:boardId', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'board.html'));
 });
 
+// --- Card detail page route ---
+app.get('/board/:boardId/card/:cardId', (req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'card.html'));
+});
+
 // === API Routes ===
 
 // --- Boards ---
@@ -715,7 +720,8 @@ app.post('/api/cards/:cardId/checklist', authMiddleware, requireEdit, (req, res)
 app.patch('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.itemId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const item = db.updateChecklistItem(id, req.body);
+  const checkedBy = getRequestUser(req);
+  const item = db.updateChecklistItem(id, req.body, checkedBy);
   if (!item) return res.status(404).json({ error: 'Item not found' });
   const boardId = db.getCardBoardId(item.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_updated' });

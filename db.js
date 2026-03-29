@@ -226,6 +226,18 @@ try {
   db.exec("ALTER TABLE comments ADD COLUMN author TEXT DEFAULT ''");
 }
 
+// Migration: add checked_by and checked_at columns to checklist_items if missing
+try {
+  db.prepare("SELECT checked_by FROM checklist_items LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE checklist_items ADD COLUMN checked_by TEXT DEFAULT NULL");
+}
+try {
+  db.prepare("SELECT checked_at FROM checklist_items LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE checklist_items ADD COLUMN checked_at TEXT DEFAULT NULL");
+}
+
 
 const userCount = db.prepare('SELECT COUNT(*) as c FROM users').get().c;
 if (userCount === 0) {
@@ -709,14 +721,27 @@ function createChecklistItem(cardId, text) {
 }
 
 // Fix #10: atomic single UPDATE combining text and checked changes
-function updateChecklistItem(id, updates) {
+function updateChecklistItem(id, updates, checkedBy) {
   const item = db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(id);
   if (!item) return null;
 
   const newText    = updates.text    !== undefined ? updates.text              : item.text;
   const newChecked = updates.checked !== undefined ? (updates.checked ? 1 : 0) : item.checked;
 
-  db.prepare('UPDATE checklist_items SET text = ?, checked = ? WHERE id = ?').run(newText, newChecked, id);
+  // Track who checked and when
+  let newCheckedBy = item.checked_by || null;
+  let newCheckedAt = item.checked_at || null;
+  if (updates.checked !== undefined) {
+    if (updates.checked) {
+      newCheckedBy = checkedBy || null;
+      newCheckedAt = new Date().toISOString();
+    } else {
+      newCheckedBy = null;
+      newCheckedAt = null;
+    }
+  }
+
+  db.prepare('UPDATE checklist_items SET text = ?, checked = ?, checked_by = ?, checked_at = ? WHERE id = ?').run(newText, newChecked, newCheckedBy, newCheckedAt, id);
 
   const updated = db.prepare('SELECT * FROM checklist_items WHERE id = ?').get(id);
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(item.card_id);
