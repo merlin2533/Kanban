@@ -1,21 +1,45 @@
 services:
-  kanban:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-kanban}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - kanban-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  app:
     image: ${IMAGE:-merlin2539/kanban:latest}
     build: .
     container_name: kanban
     restart: unless-stopped
     ports:
-      - "${PORT:-3000}:3000"
+      - "${PORT:-3200}:3000"
+    depends_on:
+      db:
+        condition: service_healthy
     volumes:
-      - kanban-data:/data
       - kanban-uploads:/app/uploads
     environment:
-      - PORT=3000
-      - DB_PATH=/data/kanban.db
       - NODE_ENV=production
-      - BASE_URL=${BASE_URL:-http://localhost:3000}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
+      - BASE_URL=${BASE_URL:-http://localhost:3200}
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - RESEND_API_KEY=${RESEND_API_KEY:-}
+      - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
+      - API_KEY=${API_KEY:-default-dev-api-key}
+      - CRON_SECRET=${CRON_SECRET:-default-cron-secret}
+      - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
+      - REMINDER_ESCALATION_DAYS=${REMINDER_ESCALATION_DAYS:-3}
+      - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/"]
       interval: 30s
@@ -24,5 +48,5 @@ services:
       start_period: 10s
 
 volumes:
-  kanban-data:
+  kanban-db-data:
   kanban-uploads:
