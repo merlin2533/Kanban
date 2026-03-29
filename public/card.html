@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Karte – Kanban</title>
+  <link rel="stylesheet" href="/style.css">
+  <link rel="manifest" href="/manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
+</head>
+<body>
+  <header>
+    <a id="backLink" href="/" class="home-link back-link" aria-label="Zurück zum Board">&#8592;</a>
+    <h1 id="boardTitle" class="card-page-board-title"></h1>
+    <div class="header-actions" id="headerActions">
+      <button id="duplicateCardBtn" class="icon-btn" title="Karte duplizieren" aria-label="Karte duplizieren">&#9112;</button>
+    </div>
+  </header>
+
+  <main class="card-page-main">
+    <div class="card-page-layout">
+
+      <!-- Left: Main content -->
+      <div class="card-page-body">
+
+        <!-- Title -->
+        <div class="card-page-title-row">
+          <input id="cardTitle" class="card-page-title-input" type="text" placeholder="Kartentitel..." aria-label="Kartentitel">
+        </div>
+
+        <!-- Description -->
+        <section class="card-page-section">
+          <div class="card-page-section-header">
+            <h3 class="card-page-section-label">Beschreibung</h3>
+            <button id="descPreviewBtn" class="desc-preview-btn" title="Vorschau umschalten">Vorschau</button>
+          </div>
+          <textarea id="cardDescription" class="card-page-description" placeholder="Beschreibung hinzufügen... (Markdown unterstützt)" rows="5" aria-label="Beschreibung"></textarea>
+          <div id="descPreview" class="card-page-desc-preview hidden"></div>
+        </section>
+
+        <!-- Comments -->
+        <section class="card-page-section">
+          <h3 class="card-page-section-label">Kommentare</h3>
+          <!-- Input first so new comments are added at top (newest first) -->
+          <div class="card-page-comment-form">
+            <textarea id="commentInput" class="card-page-comment-input" placeholder="Kommentar schreiben..." rows="2" aria-label="Neuer Kommentar"></textarea>
+            <div class="card-page-comment-form-footer">
+              <small class="comment-markdown-hint">Markdown: **fett**, *kursiv*, `code`, [Link](url)</small>
+              <button id="addCommentBtn" class="btn-primary">Senden</button>
+            </div>
+          </div>
+          <div id="commentsList" class="card-page-comments-list"></div>
+        </section>
+
+        <!-- Activity Log -->
+        <section class="card-page-section">
+          <h3 class="card-page-section-label" style="cursor:pointer;" id="activityToggle">
+            Aktivität <span id="activityToggleIcon">&#9660;</span>
+          </h3>
+          <div id="activityList" class="card-activity-list hidden"></div>
+        </section>
+
+      </div>
+
+      <!-- Right: Sidebar -->
+      <aside class="card-page-sidebar">
+
+        <!-- Status badge (archived) -->
+        <div id="archivedBadge" class="archived-badge hidden">Archiviert</div>
+
+        <!-- Due Date -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Fälligkeitsdatum</h3>
+          <input type="date" id="cardDueDate" class="sidebar-input" aria-label="Fälligkeitsdatum">
+        </section>
+
+        <!-- Recurrence -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Wiederholung</h3>
+          <select id="cardRecurrence" class="sidebar-input" aria-label="Wiederholung">
+            <option value="">Keine</option>
+            <option value="daily">Täglich</option>
+            <option value="weekly">Wöchentlich</option>
+            <option value="monthly">Monatlich</option>
+          </select>
+          <p class="sidebar-hint">Nach Archivierung wird automatisch eine neue Karte erstellt.</p>
+        </section>
+
+        <!-- Priority -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Priorität</h3>
+          <div class="priority-select" id="prioritySelect">
+            <button data-priority="" class="priority-btn priority-none active">Keine</button>
+            <button data-priority="low" class="priority-btn priority-low">Niedrig</button>
+            <button data-priority="medium" class="priority-btn priority-medium">Mittel</button>
+            <button data-priority="high" class="priority-btn priority-high">Hoch</button>
+          </div>
+        </section>
+
+        <!-- Assignees -->
+        <section class="sidebar-section" id="assigneesSection">
+          <h3 class="sidebar-section-label">Zugewiesen</h3>
+          <div id="cardAssignees" class="assignee-list"></div>
+          <select id="assignUserSelect" class="sidebar-input" aria-label="Benutzer zuweisen" style="margin-top:8px;">
+            <option value="">+ Benutzer zuweisen...</option>
+          </select>
+        </section>
+
+        <!-- Labels -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Labels</h3>
+          <div id="cardLabels" class="card-labels-list"></div>
+          <div class="label-picker" id="labelPicker">
+            <button id="addLabelBtn" class="add-label-btn">+ Label</button>
+            <div id="labelDropdown" class="label-dropdown hidden">
+              <div id="boardLabelsList" class="board-labels-list"></div>
+              <div class="new-label-row">
+                <input id="newLabelName" type="text" placeholder="Neues Label..." maxlength="100" aria-label="Label-Name">
+                <input id="newLabelColor" type="color" value="#2563eb" aria-label="Label-Farbe">
+                <button id="createLabelBtn">+</button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <!-- Checklist -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Checkliste <span id="checklistProgress"></span></h3>
+          <div id="checklistItems"></div>
+          <div class="add-row" style="margin-top:8px;">
+            <input id="checklistInput" type="text" placeholder="Neues Item..." aria-label="Neues Checklist-Item">
+            <button id="addChecklistBtn">+</button>
+          </div>
+        </section>
+
+        <!-- Attachments -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Dateien &amp; Bilder</h3>
+          <div id="attachmentsList"></div>
+          <div class="upload-area" id="uploadArea">
+            <input type="file" id="fileInput" multiple hidden>
+            <button id="uploadBtn" aria-label="Datei auswählen">Datei hochladen</button>
+            <span class="upload-hint">oder hierher ziehen</span>
+          </div>
+        </section>
+
+        <!-- Move Card -->
+        <section class="sidebar-section" id="moveSection">
+          <h3 class="sidebar-section-label">Verschieben</h3>
+          <div style="display:flex;gap:8px;">
+            <select id="moveColumnSelect" class="sidebar-input" aria-label="Spalte auswählen" style="flex:1;"></select>
+            <button id="moveCardBtn" class="btn-move">Verschieben</button>
+          </div>
+        </section>
+
+        <!-- Actions -->
+        <section class="sidebar-section sidebar-actions">
+          <button id="archiveCardBtn" class="archive-btn" style="width:100%;">Archivieren</button>
+          <button id="restoreCardBtn" class="restore-btn hidden" style="width:100%;">Wiederherstellen</button>
+          <button id="deleteCardBtn" class="danger-btn" style="width:100%;margin-top:8px;">Karte löschen</button>
+        </section>
+
+      </aside>
+    </div>
+  </main>
+
+  <!-- Guest Name Dialog -->
+  <div id="guestNameOverlay" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-label="Name eingeben">
+    <div class="guest-name-dialog">
+      <h2>Willkommen!</h2>
+      <p>Bitte gib deinen Namen ein, um fortzufahren:</p>
+      <div class="guest-name-form">
+        <input id="guestNameInput" type="text" placeholder="Dein Name..." maxlength="100" aria-label="Name" autocomplete="name">
+        <button id="guestNameBtn">Weiter</button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/card.js"></script>
+</body>
+</html>

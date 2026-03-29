@@ -323,13 +323,60 @@ document.addEventListener('DOMContentLoaded', async () => {
   searchInput.setAttribute('aria-label', 'Karten suchen');
   document.querySelector('header').insertBefore(searchInput, document.querySelector('.header-actions'));
 
+  let searchTimer = null;
+  let searchResultsContainer = null;
+
+  function showSearchResults(results) {
+    if (!searchResultsContainer) {
+      searchResultsContainer = document.createElement('div');
+      searchResultsContainer.className = 'search-results-dropdown';
+      searchInput.parentNode.insertBefore(searchResultsContainer, searchInput.nextSibling);
+    }
+    searchResultsContainer.innerHTML = '';
+    if (!results.length) {
+      searchResultsContainer.innerHTML = '<div class="search-result-empty">Keine Ergebnisse</div>';
+      searchResultsContainer.classList.remove('hidden');
+      return;
+    }
+    for (const card of results) {
+      const item = document.createElement('a');
+      item.className = 'search-result-item';
+      const token = window._accessToken ? `?token=${window._accessToken}` : '';
+      item.href = `/board/${boardId}/card/${card.id}${token}`;
+      const colors = { high: '#dc2626', medium: '#f59e0b', low: '#22c55e' };
+      const priorityDot = card.priority ? `<span class="search-result-priority" style="background:${colors[card.priority]}"></span>` : '';
+      item.innerHTML = `<span class="search-result-text">${esc(card.text)}</span>${priorityDot}<span class="search-result-col">${esc(card.column_title || '')}</span>`;
+      searchResultsContainer.appendChild(item);
+    }
+    searchResultsContainer.classList.remove('hidden');
+  }
+
+  function hideSearchResults() {
+    if (searchResultsContainer) searchResultsContainer.classList.add('hidden');
+    // Also restore all cards visibility
+    document.querySelectorAll('.card').forEach(c => c.style.display = '');
+  }
+
   searchInput.oninput = () => {
-    const query = searchInput.value.toLowerCase().trim();
+    const query = searchInput.value.trim();
+    clearTimeout(searchTimer);
+    if (!query) { hideSearchResults(); return; }
+    // Quick client-side filter while waiting for server
     document.querySelectorAll('.card').forEach(card => {
       const text = card.textContent.toLowerCase();
-      card.style.display = !query || text.includes(query) ? '' : 'none';
+      card.style.display = text.includes(query.toLowerCase()) ? '' : 'none';
     });
+    if (query.length < 2) return;
+    searchTimer = setTimeout(async () => {
+      try {
+        const results = await api(`/api/boards/${boardId}/search?q=${encodeURIComponent(query)}`);
+        showSearchResults(results);
+      } catch {}
+    }, 300);
   };
+
+  searchInput.onblur = () => setTimeout(hideSearchResults, 200);
+  searchInput.onfocus = () => { if (searchInput.value.trim().length >= 2 && searchResultsContainer) searchResultsContainer.classList.remove('hidden'); };
 
   // Sort
   const sortSelect = document.createElement('select');
@@ -377,7 +424,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       const a = document.createElement('a');
       a.href = url;
       a.download = (board.title || 'board') + '.json';
+      a.style.display = 'none';
+      document.body.appendChild(a);
       a.click();
+      document.body.removeChild(a);
       URL.revokeObjectURL(url);
     } catch (e) { showError(e.message); }
   };
@@ -485,6 +535,100 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
     document.querySelector('.header-actions').insertBefore(templateBtn, document.getElementById('activityBtn'));
   }
+
+  // Bulk select mode
+  let bulkMode = false;
+  const selectedCards = new Set();
+
+  const bulkBtn = document.createElement('button');
+  bulkBtn.className = 'icon-btn';
+  bulkBtn.innerHTML = '&#9745;'; // checkbox icon
+  bulkBtn.title = 'Mehrfachauswahl';
+  bulkBtn.id = 'bulkSelectBtn';
+  if (!canEdit()) bulkBtn.style.display = 'none';
+  bulkBtn.onclick = () => toggleBulkMode();
+  document.querySelector('.header-actions').insertBefore(bulkBtn, document.getElementById('activityBtn'));
+
+  // Bulk toolbar (hidden by default)
+  const bulkToolbar = document.createElement('div');
+  bulkToolbar.className = 'bulk-toolbar hidden';
+  bulkToolbar.id = 'bulkToolbar';
+  bulkToolbar.innerHTML = `
+    <span id="bulkCount">0 ausgewählt</span>
+    <button class="bulk-action-btn" id="bulkArchiveBtn">Archivieren</button>
+    <button class="bulk-action-btn" id="bulkDeleteBtn" style="color:#dc2626">Löschen</button>
+    <select class="bulk-action-btn" id="bulkMoveSelect"><option value="">In Spalte verschieben...</option></select>
+    <button class="bulk-action-btn" id="bulkCancelBtn">Abbrechen</button>
+  `;
+  document.querySelector('header').appendChild(bulkToolbar);
+
+  function toggleBulkMode(on) {
+    bulkMode = on !== undefined ? on : !bulkMode;
+    selectedCards.clear();
+    bulkBtn.classList.toggle('active', bulkMode);
+    bulkToolbar.classList.toggle('hidden', !bulkMode);
+    updateBulkCount();
+    renderBoard(); // Re-render to show/hide checkboxes
+  }
+
+  function updateBulkCount() {
+    const el = document.getElementById('bulkCount');
+    if (el) el.textContent = selectedCards.size + ' ausgewählt';
+    const archBtn = document.getElementById('bulkArchiveBtn');
+    const delBtn = document.getElementById('bulkDeleteBtn');
+    const moveSel = document.getElementById('bulkMoveSelect');
+    const disabled = selectedCards.size === 0;
+    if (archBtn) archBtn.disabled = disabled;
+    if (delBtn) delBtn.disabled = disabled;
+    if (moveSel) moveSel.disabled = disabled;
+  }
+
+  document.getElementById('bulkArchiveBtn').onclick = async () => {
+    if (!selectedCards.size) return;
+    try {
+      await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'archive', cardIds: [...selectedCards] });
+      toggleBulkMode(false);
+      loadBoard();
+    } catch (e) { showError(e.message); }
+  };
+
+  document.getElementById('bulkDeleteBtn').onclick = async () => {
+    if (!selectedCards.size || !confirm(`${selectedCards.size} Karten löschen?`)) return;
+    try {
+      await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'delete', cardIds: [...selectedCards] });
+      toggleBulkMode(false);
+      loadBoard();
+    } catch (e) { showError(e.message); }
+  };
+
+  document.getElementById('bulkMoveSelect').onchange = async (e) => {
+    const colId = Number(e.target.value);
+    if (!colId || !selectedCards.size) { e.target.value = ''; return; }
+    try {
+      await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'move', cardIds: [...selectedCards], columnId: colId });
+      toggleBulkMode(false);
+      loadBoard();
+    } catch (err) { showError(err.message); }
+    e.target.value = '';
+  };
+
+  document.getElementById('bulkCancelBtn').onclick = () => toggleBulkMode(false);
+
+  // Expose to createCardEl and renderBoard
+  window._bulkMode = () => bulkMode;
+  window._selectedCards = selectedCards;
+  window._updateBulkCount = updateBulkCount;
+  window._updateBulkMoveColumns = () => {
+    const sel = document.getElementById('bulkMoveSelect');
+    if (!sel || !board) return;
+    sel.innerHTML = '<option value="">In Spalte verschieben...</option>';
+    for (const col of board.columns) {
+      const opt = document.createElement('option');
+      opt.value = col.id;
+      opt.textContent = col.title;
+      sel.appendChild(opt);
+    }
+  };
 
   // Keyboard shortcuts
   document.addEventListener('keydown', (e) => {
@@ -669,6 +813,7 @@ async function handleColumnDrop(e) {
 function renderBoard() {
   const boardEl = document.getElementById('board');
   boardEl.innerHTML = '';
+  if (window._updateBulkMoveColumns) window._updateBulkMoveColumns();
 
   for (const col of board.columns) {
     boardEl.appendChild(createColumnEl(col));
@@ -866,15 +1011,47 @@ function createColumnEl(col) {
   addInput.onkeydown = async (e) => {
     if (e.key === 'Enter' && addInput.value.trim()) {
       try {
-        await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
+        const newCard = await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
         addInput.value = '';
-        loadBoard();
+        const token = window._accessToken ? `?token=${window._accessToken}` : '';
+        window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
       } catch (e) {
         showError(e.message);
       }
     }
   };
   addCard.appendChild(addInput);
+
+  // Card template dropdown
+  const templateSelect = document.createElement('select');
+  templateSelect.className = 'card-template-select';
+  templateSelect.title = 'Aus Vorlage erstellen';
+  templateSelect.innerHTML = '<option value="">Vorlage...</option>';
+  // Populate lazily on focus
+  templateSelect.onfocus = async () => {
+    if (templateSelect.dataset.loaded) return;
+    templateSelect.dataset.loaded = '1';
+    try {
+      const templates = await api(`/api/boards/${boardId}/card-templates`);
+      for (const t of templates) {
+        const opt = document.createElement('option');
+        opt.value = t.id;
+        opt.textContent = t.name;
+        templateSelect.appendChild(opt);
+      }
+    } catch {}
+  };
+  templateSelect.onchange = async () => {
+    const templateId = Number(templateSelect.value);
+    if (!templateId) return;
+    templateSelect.value = '';
+    try {
+      const newCard = await api(`/api/columns/${col.id}/cards/from-template`, 'POST', { templateId });
+      const token = window._accessToken ? `?token=${window._accessToken}` : '';
+      window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
+    } catch (e) { showError(e.message); }
+  };
+  addCard.appendChild(templateSelect);
 
   if (!canEdit()) {
     addCard.style.display = 'none';
@@ -1005,13 +1182,36 @@ function createCardEl(card) {
     div.style.borderLeft = `4px solid ${colors[card.priority] || 'transparent'}`;
   }
 
-  // Click to open modal
+  // Bulk select checkbox
+  if (window._bulkMode && window._bulkMode()) {
+    const cb = document.createElement('input');
+    cb.type = 'checkbox';
+    cb.className = 'card-bulk-checkbox';
+    cb.checked = window._selectedCards && window._selectedCards.has(card.id);
+    cb.onclick = (e) => {
+      e.stopPropagation();
+      if (window._selectedCards) {
+        if (cb.checked) window._selectedCards.add(card.id);
+        else window._selectedCards.delete(card.id);
+        if (window._updateBulkCount) window._updateBulkCount();
+      }
+    };
+    div.insertBefore(cb, div.firstChild);
+  }
+
+  // Click to navigate to card page
   div.onclick = (e) => {
     if (e.target.closest('.card-thumbnail')) return;
-    // Dismiss activity highlight when card is opened
+    if (e.target.classList.contains('card-bulk-checkbox')) return;
+    if (window._bulkMode && window._bulkMode()) {
+      // In bulk mode: toggle selection
+      const cb = div.querySelector('.card-bulk-checkbox');
+      if (cb) { cb.checked = !cb.checked; cb.onclick(e); }
+      return;
+    }
     modifiedCards.delete(card.id);
-    div.classList.remove('card-activity-highlight');
-    openCardModal(card);
+    const token = window._accessToken ? `?token=${window._accessToken}` : '';
+    window.location.href = `/board/${boardId}/card/${card.id}${token}`;
   };
 
   // Drag events
