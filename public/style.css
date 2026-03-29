@@ -1,10 +1,35 @@
+:root {
+  --color-primary: #2563eb;
+  --color-primary-hover: #1d4ed8;
+  --color-danger: #dc2626;
+  --color-warning: #f59e0b;
+  --color-success: #22c55e;
+  --color-bg: #f0f2f5;
+  --color-surface: #fff;
+  --color-surface-alt: #f1f5f9;
+  --color-border: #e2e8f0;
+  --color-border-light: #f1f5f9;
+  --color-text: #1e293b;
+  --color-text-muted: #64748b;
+  --color-text-faint: #94a3b8;
+  --column-width: 280px;
+  --modal-width: 560px;
+  --radius-sm: 4px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,0.06);
+  --shadow-md: 0 2px 8px rgba(0,0,0,0.12);
+  --shadow-lg: 0 8px 32px rgba(0,0,0,0.2);
+}
+
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #f0f2f5;
+  background: var(--color-bg);
   min-height: 100vh;
-  color: #1e293b;
+  color: var(--color-text);
 }
 
 /* --- Header --- */
@@ -814,8 +839,222 @@ main#board {
   transition: opacity 0.15s;
 }
 
+.comment-actions {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+}
+
+.comment-edit {
+  background: none;
+  border: none;
+  color: #94a3b8;
+  cursor: pointer;
+  font-size: 13px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  padding: 2px;
+}
+
+.comment-item:hover .comment-edit { opacity: 1; }
 .comment-item:hover .comment-delete { opacity: 1; }
+.comment-edit:hover { color: var(--color-primary); }
 .comment-delete:hover { color: #ef4444; }
+
+.comment-edit-area {
+  width: 100%;
+  padding: 8px 10px;
+  border: 1px solid var(--color-primary);
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-family: inherit;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+}
+
+.comment-edit-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.comment-save-btn {
+  padding: 4px 12px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.comment-save-btn:hover { background: var(--color-primary-hover); }
+
+.comment-cancel-btn {
+  padding: 4px 12px;
+  background: var(--color-surface-alt);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  font-size: 12px;
+}
+
+/* --- Load More Button --- */
+.load-more-btn {
+  display: block;
+  width: 100%;
+  padding: 10px;
+  margin-top: 8px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  text-align: center;
+  transition: background 0.15s;
+}
+
+.load-more-btn:hover { background: var(--color-border); }
+.load-more-btn:disabled { opacity: 0.5; cursor: default; }
+
+/* --- Guest Name Dialog --- */
+.guest-name-dialog {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+
+.guest-name-dialog h2 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.guest-name-dialog p {
+  color: #64748b;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.guest-name-form {
+  display: flex;
+  gap: 8px;
+}
+
+.guest-name-form input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.guest-name-form input:focus {
+  border-color: #2563eb;
+}
+
+.guest-name-form button {
+  padding: 10px 20px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.guest-name-form button:hover {
+  background: #1d4ed8;
+}
+
+/* --- User Badge --- */
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  background: #f1f5f9;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.user-badge-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* --- Card Activity Highlighting --- */
+.card-activity-highlight {
+  border: 2px solid #f59e0b !important;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.3) !important;
+  animation: activity-pulse 2s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); }
+}
+
+/* --- Card Creator --- */
+.card-creator {
+  font-size: 10px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-left: auto;
+}
+
+/* --- Comment Author --- */
+.comment-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.comment-author-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.comment-author-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+/* --- Activity User --- */
+.activity-user {
+  color: #2563eb;
+  font-weight: 600;
+}
 
 /* --- Archive Button --- */
 .archive-btn {
@@ -1192,4 +1431,14 @@ main#board {
   .assignee-tag { background: #334155; }
   .assignee-dot { border-color: #334155; }
   .board-switcher { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .guest-name-dialog { background: #1e293b; }
+  .guest-name-dialog p { color: #94a3b8; }
+  .guest-name-form input { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .user-badge { background: #334155; color: #e2e8f0; }
+  .comment-author-name { color: #e2e8f0; }
+  .card-activity-highlight { border-color: #f59e0b !important; }
+  .comment-edit-area { background: #334155; color: #e2e8f0; border-color: #2563eb; }
+  .comment-cancel-btn { background: #334155; color: #94a3b8; border-color: #475569; }
+  .load-more-btn { background: #334155; border-color: #475569; color: #94a3b8; }
+  .load-more-btn:hover { background: #475569; }
 }
