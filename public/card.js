@@ -212,7 +212,11 @@ async function handleImagePaste(e, textarea, afterUpload) {
 }
 
 // --- Load card data ---
+let cardLoading = false;
 async function loadCard() {
+  if (cardLoading) return;
+  cardLoading = true;
+  try {
   board = await api(`/api/boards/${boardId}`);
   // Find the card across all columns (and archived if needed)
   for (const col of board.columns) {
@@ -233,6 +237,9 @@ async function loadCard() {
     return;
   }
   renderCardPage();
+  } finally {
+    cardLoading = false;
+  }
 }
 
 // --- Render full card page ---
@@ -792,6 +799,8 @@ function setupSSE() {
     es.onmessage = (e) => {
       const event = JSON.parse(e.data);
       if (event.type !== 'update') return;
+      // A new card being created doesn't affect the current card page
+      if (event.action === 'card_created') return;
       // Reload if this card or the board changed
       if (!event.cardId || event.cardId === cardId || event.action === 'bulk_move' || event.action === 'bulk_archive') {
         loadCard();
