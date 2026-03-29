@@ -226,6 +226,7 @@ function renderCardPage() {
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
   renderComments(card.comments || []);
+  renderRecurrence();
 
   // Move: populate column select
   const moveSelect = document.getElementById('moveColumnSelect');
@@ -729,6 +730,163 @@ async function withLoading(btn, fn) {
   try { await fn(); } finally { btn.disabled = false; btn.textContent = orig; }
 }
 
+// --- SSE real-time ---
+function setupSSE() {
+  let reconnectDelay = 2000;
+  let es;
+
+  function connect() {
+    const params = [];
+    if (window._accessToken) params.push('token=' + window._accessToken);
+    const guest = getGuestName();
+    if (guest && !currentUser) params.push('guest=' + encodeURIComponent(guest));
+    const url = `/api/boards/${boardId}/events` + (params.length ? '?' + params.join('&') : '');
+    es = new EventSource(url);
+
+    es.onmessage = (e) => {
+      const event = JSON.parse(e.data);
+      if (event.type !== 'update') return;
+      // Reload if this card or the board changed
+      if (!event.cardId || event.cardId === cardId || event.action === 'bulk_move' || event.action === 'bulk_archive') {
+        loadCard();
+      }
+    };
+
+    es.onerror = () => {
+      es.close();
+      setTimeout(() => { connect(); }, reconnectDelay);
+      reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
+    };
+    es.onopen = () => { reconnectDelay = 2000; };
+  }
+  connect();
+}
+
+// --- Markdown preview for description ---
+function setupDescriptionPreview() {
+  const btn = document.getElementById('descPreviewBtn');
+  const textarea = document.getElementById('cardDescription');
+  const preview = document.getElementById('descPreview');
+  if (!btn || !textarea || !preview) return;
+  let previewMode = false;
+
+  btn.onclick = () => {
+    previewMode = !previewMode;
+    if (previewMode) {
+      preview.innerHTML = renderMarkdown(textarea.value) || '<em style="color:#94a3b8">Keine Beschreibung</em>';
+      preview.classList.remove('hidden');
+      textarea.classList.add('hidden');
+      btn.textContent = 'Bearbeiten';
+      btn.classList.add('active');
+    } else {
+      preview.classList.add('hidden');
+      textarea.classList.remove('hidden');
+      btn.textContent = 'Vorschau';
+      btn.classList.remove('active');
+    }
+  };
+}
+
+// --- Duplicate card ---
+async function duplicateCard() {
+  const btn = document.getElementById('duplicateCardBtn');
+  await withLoading(btn, async () => {
+    try {
+      const newCard = await api(`/api/cards/${cardId}/duplicate`, 'POST');
+      const token = window._accessToken ? `?token=${window._accessToken}` : '';
+      window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
+    } catch (e) { showError(e.message); }
+  });
+}
+
+// --- Activity log ---
+let activityLoaded = false;
+
+async function toggleActivity() {
+  const list = document.getElementById('activityList');
+  const icon = document.getElementById('activityToggleIcon');
+  if (!list.classList.contains('hidden')) {
+    list.classList.add('hidden');
+    icon.textContent = '▼';
+    return;
+  }
+  list.classList.remove('hidden');
+  icon.textContent = '▲';
+  if (activityLoaded) return;
+  activityLoaded = true;
+  list.innerHTML = '<p style="color:#94a3b8;font-size:13px;padding:8px 0;">Lade...</p>';
+  try {
+    const activities = await api(`/api/cards/${cardId}/activity`);
+    renderActivity(activities, list);
+  } catch (e) { list.innerHTML = '<p style="color:#ef4444;font-size:13px;">Fehler beim Laden.</p>'; }
+}
+
+function renderActivity(activities, container) {
+  container.innerHTML = '';
+  if (!activities.length) {
+    container.innerHTML = '<p style="color:#94a3b8;font-size:13px;padding:8px 0;">Noch keine Aktivität.</p>';
+    return;
+  }
+  for (const act of activities) {
+    const item = document.createElement('div');
+    item.className = 'card-activity-item';
+    const details = JSON.parse(act.details || '{}');
+    const user = details.user ? `<strong>${esc(details.user)}</strong> ` : '';
+    const actionMap = {
+      card_created: () => `${user}Karte erstellt`,
+      card_updated: () => `${user}Karte bearbeitet`,
+      card_archived: () => `${user}Karte archiviert`,
+      card_restored: () => `${user}Karte wiederhergestellt`,
+      card_moved: () => `${user}Karte verschoben`,
+      comment_added: () => `${user}Kommentar: „${esc((details.commentText || '').slice(0, 60))}"`,
+      checklist_item_added: () => `${user}Checklist-Item hinzugefügt: ${esc(details.itemText || '')}`,
+      checklist_item_updated: () => `${user}Checklist-Item ${details.checked ? 'abgehakt' : 'abgehakt rückgängig'}: ${esc(details.itemText || '')}`,
+      file_uploaded: () => `${user}Datei hochgeladen: ${esc(details.filename || '')}`,
+    };
+    const text = (actionMap[act.action] || (() => esc(act.action)))();
+    item.innerHTML = `<span class="card-activity-text">${text}</span><span class="card-activity-time">${formatTime(act.created_at)}</span>`;
+    container.appendChild(item);
+  }
+}
+
+// --- Recurrence ---
+function renderRecurrence() {
+  const sel = document.getElementById('cardRecurrence');
+  if (sel) sel.value = card.recurrence || '';
+}
+
+// --- Browser push notifications for due dates ---
+function setupNotificationCheck() {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'denied') return;
+
+  // Check if this card is due today or overdue
+  if (!card.due_date) return;
+  const due = new Date(card.due_date);
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const dueDay = new Date(due.getFullYear(), due.getMonth(), due.getDate());
+
+  if (dueDay <= today) {
+    const isOverdue = dueDay < today;
+    const msg = isOverdue ? `Überfällig: ${card.text}` : `Heute fällig: ${card.text}`;
+
+    const showIt = () => {
+      new Notification('Kanban Erinnerung', {
+        body: msg,
+        icon: '/icons/icon-192.svg',
+        tag: 'card-due-' + cardId,
+      });
+    };
+
+    if (Notification.permission === 'granted') {
+      showIt();
+    } else {
+      Notification.requestPermission().then(p => { if (p === 'granted') showIt(); });
+    }
+  }
+}
+
 // --- Setup event listeners ---
 function setupEvents() {
   // Title save on blur
@@ -858,6 +1016,20 @@ function setupEvents() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }
   };
 
+  // Duplicate
+  document.getElementById('duplicateCardBtn').onclick = duplicateCard;
+
+  // Activity toggle
+  document.getElementById('activityToggle').onclick = toggleActivity;
+
+  // Recurrence
+  document.getElementById('cardRecurrence').onchange = async (e) => {
+    try {
+      await api(`/api/cards/${cardId}`, 'PATCH', { recurrence: e.target.value || null });
+      card.recurrence = e.target.value || null;
+    } catch (err) { showError(err.message); }
+  };
+
   // Close label dropdown on outside click
   document.addEventListener('click', (e) => {
     if (!e.target.closest('#labelPicker')) {
@@ -887,6 +1059,9 @@ if (!boardId || !cardId) {
     const authed = await checkAuth();
     if (!authed) return;
     setupEvents();
+    setupDescriptionPreview();
     await loadCard();
+    setupSSE();
+    setupNotificationCheck();
   });
 }

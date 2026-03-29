@@ -16,7 +16,9 @@
   <header>
     <a id="backLink" href="/" class="home-link back-link" aria-label="Zurück zum Board">&#8592;</a>
     <h1 id="boardTitle" class="card-page-board-title"></h1>
-    <div class="header-actions" id="headerActions"></div>
+    <div class="header-actions" id="headerActions">
+      <button id="duplicateCardBtn" class="icon-btn" title="Karte duplizieren" aria-label="Karte duplizieren">&#9112;</button>
+    </div>
   </header>
 
   <main class="card-page-main">
@@ -32,8 +34,12 @@
 
         <!-- Description -->
         <section class="card-page-section">
-          <h3 class="card-page-section-label">Beschreibung</h3>
-          <textarea id="cardDescription" class="card-page-description" placeholder="Beschreibung hinzufügen..." rows="5" aria-label="Beschreibung"></textarea>
+          <div class="card-page-section-header">
+            <h3 class="card-page-section-label">Beschreibung</h3>
+            <button id="descPreviewBtn" class="desc-preview-btn" title="Vorschau umschalten">Vorschau</button>
+          </div>
+          <textarea id="cardDescription" class="card-page-description" placeholder="Beschreibung hinzufügen... (Markdown unterstützt)" rows="5" aria-label="Beschreibung"></textarea>
+          <div id="descPreview" class="card-page-desc-preview hidden"></div>
         </section>
 
         <!-- Comments -->
@@ -50,6 +56,14 @@
           <div id="commentsList" class="card-page-comments-list"></div>
         </section>
 
+        <!-- Activity Log -->
+        <section class="card-page-section">
+          <h3 class="card-page-section-label" style="cursor:pointer;" id="activityToggle">
+            Aktivität <span id="activityToggleIcon">&#9660;</span>
+          </h3>
+          <div id="activityList" class="card-activity-list hidden"></div>
+        </section>
+
       </div>
 
       <!-- Right: Sidebar -->
@@ -62,6 +76,18 @@
         <section class="sidebar-section">
           <h3 class="sidebar-section-label">Fälligkeitsdatum</h3>
           <input type="date" id="cardDueDate" class="sidebar-input" aria-label="Fälligkeitsdatum">
+        </section>
+
+        <!-- Recurrence -->
+        <section class="sidebar-section">
+          <h3 class="sidebar-section-label">Wiederholung</h3>
+          <select id="cardRecurrence" class="sidebar-input" aria-label="Wiederholung">
+            <option value="">Keine</option>
+            <option value="daily">Täglich</option>
+            <option value="weekly">Wöchentlich</option>
+            <option value="monthly">Monatlich</option>
+          </select>
+          <p class="sidebar-hint">Nach Archivierung wird automatisch eine neue Karte erstellt.</p>
         </section>
 
         <!-- Priority -->

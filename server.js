@@ -337,7 +337,8 @@ app.get('/api/boards/:boardId/members', authMiddleware, requireAdmin, (req, res)
 app.post('/api/boards/:boardId/members', authMiddleware, requireAdmin, (req, res) => {
   const userId = validId(req.body.user_id);
   if (!userId) return res.status(400).json({ error: 'user_id required' });
-  db.addBoardMember(req.params.boardId, userId);
+  const role = req.body.role || 'editor';
+  db.addBoardMember(req.params.boardId, userId, role);
   res.status(201).json({ ok: true });
 });
 
@@ -633,6 +634,10 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
     const valid = [null, 'low', 'medium', 'high'];
     updates.priority = valid.includes(req.body.priority) ? req.body.priority : null;
   }
+  if (req.body.recurrence !== undefined) {
+    const validRec = [null, 'daily', 'weekly', 'monthly'];
+    updates.recurrence = validRec.includes(req.body.recurrence) ? req.body.recurrence : null;
+  }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
   const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
@@ -673,6 +678,31 @@ app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
   res.json(card);
 });
 
+// --- Duplicate Card ---
+app.post('/api/cards/:cardId/duplicate', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const boardId = db.getCardBoardId(id);
+  if (!boardId) return res.status(404).json({ error: 'Card not found' });
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'Access denied' });
+  const user = getRequestUser(req);
+  const newCard = db.duplicateCard(id, user);
+  if (!newCard) return res.status(404).json({ error: 'Card not found' });
+  broadcast(boardId, { type: 'update', action: 'card_created', user });
+  res.status(201).json(newCard);
+});
+
+// --- Card Activity ---
+app.get('/api/cards/:cardId/activity', authMiddleware, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const boardId = db.getCardBoardId(id);
+  if (!boardId) return res.status(404).json({ error: 'Card not found' });
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'Access denied' });
+  const limit = Math.min(Number(req.query.limit) || 50, 200);
+  res.json(db.getCardActivity(id, limit));
+});
+
 // --- Archive ---
 app.put('/api/cards/:cardId/archive', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.cardId);
@@ -680,8 +710,25 @@ app.put('/api/cards/:cardId/archive', authMiddleware, requireEdit, (req, res) =>
   const boardId = db.getCardBoardId(id);
   if (!boardId) return res.status(404).json({ error: 'Card not found' });
   if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'Access denied' });
+  const cardBefore = db.getDb().prepare('SELECT * FROM cards WHERE id = ?').get(id);
   const card = db.archiveCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
+  // Recurring: if card has recurrence, auto-create next card
+  if (cardBefore && cardBefore.recurrence) {
+    const user = getRequestUser(req);
+    const next = db.createCard(cardBefore.column_id, cardBefore.text, user);
+    if (next && cardBefore.description) {
+      db.updateCard(next.id, { description: cardBefore.description, priority: cardBefore.priority, recurrence: cardBefore.recurrence });
+    }
+    // Calculate next due date
+    if (cardBefore.due_date) {
+      const d = new Date(cardBefore.due_date);
+      if (cardBefore.recurrence === 'daily') d.setDate(d.getDate() + 1);
+      else if (cardBefore.recurrence === 'weekly') d.setDate(d.getDate() + 7);
+      else if (cardBefore.recurrence === 'monthly') d.setMonth(d.getMonth() + 1);
+      db.updateCard(next.id, { due_date: d.toISOString().slice(0, 10) });
+    }
+  }
   broadcast(boardId, { type: 'update', action: 'card_archived' });
   res.json(card);
 });
@@ -776,6 +823,95 @@ app.delete('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) =
   const comment = db.deleteComment(id);
   if (!comment) return res.status(404).json({ error: 'Comment not found' });
   res.json({ ok: true });
+});
+
+// --- Search ---
+app.get('/api/boards/:boardId/search', authMiddleware, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
+  const q = typeof req.query.q === 'string' ? req.query.q.trim() : '';
+  if (q.length < 2) return res.json([]);
+  res.json(db.searchCards(boardId, q));
+});
+
+// --- Card Templates ---
+app.get('/api/boards/:boardId/card-templates', authMiddleware, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
+  res.json(db.getCardTemplates(boardId));
+});
+
+app.post('/api/boards/:boardId/card-templates', authMiddleware, requireEdit, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
+  const name = validString(req.body.name, 200);
+  if (!name) return res.status(400).json({ error: 'name required' });
+  const textTemplate = typeof req.body.text_template === 'string' ? req.body.text_template.slice(0, 1000) : '';
+  const descTemplate = typeof req.body.description_template === 'string' ? req.body.description_template.slice(0, 5000) : '';
+  const checklistJson = Array.isArray(req.body.checklist) ? JSON.stringify(req.body.checklist.map(String).slice(0, 50)) : '[]';
+  const validPri = [null, 'low', 'medium', 'high'];
+  const priority = validPri.includes(req.body.priority) ? req.body.priority : null;
+  const tmpl = db.createCardTemplate(boardId, name, textTemplate, descTemplate, checklistJson, priority);
+  res.status(201).json(tmpl);
+});
+
+app.delete('/api/card-templates/:id', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const tmpl = db.deleteCardTemplate(id);
+  if (!tmpl) return res.status(404).json({ error: 'Template not found' });
+  res.json({ ok: true });
+});
+
+app.post('/api/columns/:columnId/cards/from-template', authMiddleware, requireEdit, (req, res) => {
+  const columnId = validId(req.params.columnId);
+  if (!columnId) return res.status(400).json({ error: 'Invalid ID' });
+  const templateId = validId(req.body.templateId);
+  if (!templateId) return res.status(400).json({ error: 'templateId required' });
+  const user = getRequestUser(req);
+  const card = db.createCardFromTemplate(templateId, columnId, user);
+  if (!card) return res.status(404).json({ error: 'Template or column not found' });
+  const boardId = db.getColumnBoardId(columnId);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_created', user });
+  res.status(201).json(card);
+});
+
+// --- Bulk Operations ---
+app.post('/api/boards/:boardId/bulk', authMiddleware, requireEdit, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
+  const { action, cardIds, columnId, labelId } = req.body;
+  if (!Array.isArray(cardIds) || cardIds.length === 0) return res.status(400).json({ error: 'cardIds required' });
+  const validatedIds = cardIds.map(id => validId(id)).filter(Boolean);
+  if (validatedIds.length === 0) return res.status(400).json({ error: 'No valid card IDs' });
+  const user = getRequestUser(req);
+  try {
+    if (action === 'archive') {
+      for (const id of validatedIds) db.archiveCard(id);
+    } else if (action === 'delete') {
+      for (const id of validatedIds) {
+        const fps = db.getCardAttachmentPaths(id);
+        db.deleteCard(id);
+        for (const fp of fps) { try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {} }
+      }
+    } else if (action === 'move' && columnId) {
+      const col = validId(columnId);
+      if (col) for (const id of validatedIds) db.moveCard(id, col, 999);
+    } else if (action === 'label' && labelId) {
+      const lid = validId(labelId);
+      if (lid) for (const id of validatedIds) { try { db.addLabelToCard(id, lid); } catch {} }
+    } else if (action === 'priority') {
+      const validPri = [null, 'low', 'medium', 'high'];
+      const priority = validPri.includes(req.body.priority) ? req.body.priority : null;
+      for (const id of validatedIds) db.updateCard(id, { priority });
+    } else {
+      return res.status(400).json({ error: 'Unknown action' });
+    }
+    broadcast(boardId, { type: 'update', action: 'bulk_' + action, user });
+    res.json({ ok: true, count: validatedIds.length });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // --- Labels ---
