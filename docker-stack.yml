@@ -4,14 +4,14 @@
 # Configure via environment or .env file before deploy
 
 services:
-  db:
+  resqioticket_DB:
     image: postgres:16-alpine
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-kanban}
+      POSTGRES_DB: ${POSTGRES_DB:-resqioticket}
       POSTGRES_USER: ${POSTGRES_USER:-postgres}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
     volumes:
-      - kanban-db-data:/var/lib/postgresql/data
+      - resqioticket_db_postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
       interval: 5s
@@ -35,7 +35,7 @@ services:
         protocol: tcp
         mode: ingress
     environment:
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@resqioticket_DB:5432/resqioticket}
       - BASE_URL=${BASE_URL:-http://localhost:3200}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
@@ -71,21 +71,22 @@ services:
     image: ${IMAGE:-merlin2539/kanban:latest}
     ports:
       - target: 3000
-        published: ${PORT:-3000}
+        published: ${PORT:-3200}
         protocol: tcp
         mode: ingress
     volumes:
       - kanban-uploads:/app/uploads
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@db:5432/kanban}
-      - BASE_URL=${APP_URL:-http://localhost:3000}
+      - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@resqioticket_DB:5432/resqioticket}
+      - BASE_URL=${APP_URL:-http://localhost:3200}
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
-      - API_KEY=${API_KEY:-}
+      - API_KEY=${API_KEY:-default-dev-api-key}
       - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
+      - CRON_SECRET=${CRON_SECRET:-default-cron-secret}
       - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
       - REMINDER_ESCALATION_DAYS=${REMINDER_ESCALATION_DAYS:-3}
     deploy:
@@ -132,7 +133,7 @@ networks:
     driver: overlay
 
 volumes:
-  kanban-db-data:
+  resqioticket_db_postgres_data:
     driver: local
   kanban-uploads:
     driver: local
