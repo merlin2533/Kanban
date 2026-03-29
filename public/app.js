@@ -115,9 +115,25 @@ async function checkAuth() {
         currentPermission = 'admin';
         console.log('[AUTH] app.js checkAuth: authenticated as', currentUser.username);
       } else {
-        console.warn('[AUTH] app.js checkAuth: NOT authenticated, redirecting to login');
-        window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
-        return false;
+        // Check if board has public access before redirecting to login
+        const pubRes = await fetch(`/api/boards/${boardId}/public-info`);
+        if (pubRes.ok) {
+          const pubData = await pubRes.json();
+          if (pubData.public_access) {
+            window._accessToken = pubData.token;
+            currentPermission = pubData.public_access;
+            console.log('[AUTH] app.js checkAuth: public board access, permission:', currentPermission);
+            await promptGuestName();
+          } else {
+            console.warn('[AUTH] app.js checkAuth: NOT authenticated, redirecting to login');
+            window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+            return false;
+          }
+        } else {
+          console.warn('[AUTH] app.js checkAuth: NOT authenticated, redirecting to login');
+          window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
+          return false;
+        }
       }
     }
   } catch (err) {
@@ -284,35 +300,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   boardTitleEl.addEventListener('keydown', (e) => {
     if (e.key === 'Enter') { e.preventDefault(); boardTitleEl.blur(); }
   });
-
-  // Board switcher
-  if (!window._accessToken) {
-    const switcherWrap = document.createElement('div');
-    switcherWrap.className = 'board-switcher-wrap';
-    const switcherSelect = document.createElement('select');
-    switcherSelect.className = 'board-switcher';
-    switcherSelect.setAttribute('aria-label', 'Board wechseln');
-    switcherSelect.title = 'Board wechseln';
-    document.querySelector('header').insertBefore(switcherWrap, document.querySelector('.header-actions'));
-    switcherWrap.appendChild(switcherSelect);
-
-    api('/api/boards').then(boards => {
-      switcherSelect.innerHTML = '';
-      for (const b of boards) {
-        const opt = document.createElement('option');
-        opt.value = b.id;
-        opt.textContent = b.title;
-        if (b.id === boardId) opt.selected = true;
-        switcherSelect.appendChild(opt);
-      }
-    }).catch(() => {});
-
-    switcherSelect.onchange = () => {
-      if (switcherSelect.value !== boardId) {
-        window.location.href = '/board/' + switcherSelect.value;
-      }
-    };
-  }
 
   // Search filter
   const searchInput = document.createElement('input');
@@ -2349,11 +2336,24 @@ async function togglePermissionsPanel() {
     panel.className = 'activity-panel';
     panel.innerHTML = `
       <div class="activity-header">
-        <h2>Zugriffs-Links</h2>
+        <h2>Zugriff &amp; Links</h2>
         <button class="icon-btn" onclick="document.getElementById('permissionsPanel').classList.add('hidden')" aria-label="Schließen">&times;</button>
+      </div>
+      <div style="padding:12px 20px;border-bottom:1px solid #e2e8f0;">
+        <div style="font-weight:600;margin-bottom:8px;font-size:14px;">&#127758; Öffentlicher Zugang</div>
+        <p style="font-size:12px;color:#64748b;margin:0 0 8px;">Jeder mit dem Board-Link kann zugreifen (ohne Token).</p>
+        <div style="display:flex;gap:8px;align-items:center;">
+          <select id="publicAccessPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
+            <option value="">Deaktiviert</option>
+            <option value="view">Nur lesen</option>
+            <option value="edit">Bearbeiten</option>
+          </select>
+          <button onclick="savePublicAccess()" style="padding:6px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Speichern</button>
+        </div>
       </div>
       <div id="accessLinksList" class="activity-list"></div>
       <div style="padding:12px 20px;border-top:1px solid #e2e8f0;">
+        <div style="font-weight:600;margin-bottom:8px;font-size:14px;">+ Token-Link erstellen</div>
         <div style="display:flex;gap:8px;align-items:center;">
           <select id="newLinkPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
             <option value="view">Nur lesen</option>
@@ -2367,16 +2367,21 @@ async function togglePermissionsPanel() {
     document.body.appendChild(panel);
   }
 
-  // Load links
+  // Load public access setting and links
   try {
+    const pubInfo = await fetch(`/api/boards/${boardId}/public-info`).then(r => r.json());
+    const pubSelect = document.getElementById('publicAccessPermission');
+    if (pubSelect) pubSelect.value = pubInfo.public_access || '';
+
     const links = await api(`/api/boards/${boardId}/access-links`);
+    const visibleLinks = links.filter(l => !l.id.startsWith('pub_'));
     const list = document.getElementById('accessLinksList');
     list.innerHTML = '';
 
-    if (links.length === 0) {
-      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Keine Zugriffs-Links.</p>';
+    if (visibleLinks.length === 0) {
+      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Keine Token-Links.</p>';
     } else {
-      for (const link of links) {
+      for (const link of visibleLinks) {
         const item = document.createElement('div');
         item.style.cssText = 'padding:10px 0;border-bottom:1px solid #f1f5f9;';
 
@@ -2437,11 +2442,19 @@ async function createAccessLink() {
   } catch (e) { showError(e.message); }
 }
 
+async function savePublicAccess() {
+  const permission = document.getElementById('publicAccessPermission').value || null;
+  try {
+    await api(`/api/boards/${boardId}/public-access`, 'PUT', { permission });
+    const btn = document.querySelector('#permissionsPanel button[onclick="savePublicAccess()"]');
+    if (btn) { const orig = btn.textContent; btn.textContent = '✓'; setTimeout(() => { btn.textContent = orig; }, 1500); }
+  } catch (e) { showError(e.message); }
+}
+
 // --- Board Switcher ---
 async function setupBoardSwitcher() {
   try {
     const boards = await api('/api/boards');
-    if (boards.length <= 1) return; // No need for switcher with only one board
 
     const switcher = document.createElement('select');
     switcher.className = 'board-switcher';
@@ -2463,6 +2476,9 @@ async function setupBoardSwitcher() {
     const header = document.querySelector('header');
     const boardTitle = document.getElementById('boardTitle');
     header.insertBefore(switcher, boardTitle);
+
+    // Hide h1 when switcher is present — they both show the board name
+    boardTitle.style.display = 'none';
   } catch {}
 }
 

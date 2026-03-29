@@ -316,6 +316,24 @@ app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Public Board Info (no auth required) ---
+app.get('/api/boards/:boardId/public-info', (req, res) => {
+  const boardId = req.params.boardId;
+  if (!boardId) return res.status(400).json({ error: 'Invalid ID' });
+  const publicAccess = db.getBoardPublicAccess(boardId);
+  if (!publicAccess) return res.json({ public_access: null });
+  res.json({ public_access: publicAccess, token: 'pub_' + boardId });
+});
+
+// --- Public Access Toggle (admin only) ---
+app.put('/api/boards/:boardId/public-access', authMiddleware, requireAdmin, (req, res) => {
+  const boardId = req.params.boardId;
+  if (!boardId) return res.status(400).json({ error: 'Invalid ID' });
+  const permission = req.body.permission; // 'view', 'edit', or null
+  const result = db.setBoardPublicAccess(boardId, permission);
+  res.json({ public_access: result });
+});
+
 // --- Board Access Links ---
 app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
   const boardId = req.params.boardId;
