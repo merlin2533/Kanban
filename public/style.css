@@ -817,6 +817,141 @@ main#board {
 .comment-item:hover .comment-delete { opacity: 1; }
 .comment-delete:hover { color: #ef4444; }
 
+/* --- Guest Name Dialog --- */
+.guest-name-dialog {
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px;
+  max-width: 400px;
+  width: 90%;
+  text-align: center;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.2);
+}
+
+.guest-name-dialog h2 {
+  font-size: 20px;
+  margin-bottom: 8px;
+}
+
+.guest-name-dialog p {
+  color: #64748b;
+  font-size: 14px;
+  margin-bottom: 20px;
+}
+
+.guest-name-form {
+  display: flex;
+  gap: 8px;
+}
+
+.guest-name-form input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 2px solid #e2e8f0;
+  border-radius: 8px;
+  font-size: 15px;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+.guest-name-form input:focus {
+  border-color: #2563eb;
+}
+
+.guest-name-form button {
+  padding: 10px 20px;
+  background: #2563eb;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.guest-name-form button:hover {
+  background: #1d4ed8;
+}
+
+/* --- User Badge --- */
+.user-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px 4px 4px;
+  background: #f1f5f9;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #334155;
+}
+
+.user-badge-dot {
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* --- Card Activity Highlighting --- */
+.card-activity-highlight {
+  border: 2px solid #f59e0b !important;
+  box-shadow: 0 0 8px rgba(245, 158, 11, 0.3) !important;
+  animation: activity-pulse 2s ease-in-out infinite;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); }
+  50% { box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); }
+}
+
+/* --- Card Creator --- */
+.card-creator {
+  font-size: 10px;
+  color: #94a3b8;
+  font-style: italic;
+  margin-left: auto;
+}
+
+/* --- Comment Author --- */
+.comment-author {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+
+.comment-author-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  flex-shrink: 0;
+}
+
+.comment-author-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: #334155;
+}
+
+/* --- Activity User --- */
+.activity-user {
+  color: #2563eb;
+  font-weight: 600;
+}
+
 /* --- Archive Button --- */
 .archive-btn {
   background: #fef3c7;
@@ -1192,4 +1327,10 @@ main#board {
   .assignee-tag { background: #334155; }
   .assignee-dot { border-color: #334155; }
   .board-switcher { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .guest-name-dialog { background: #1e293b; }
+  .guest-name-dialog p { color: #94a3b8; }
+  .guest-name-form input { background: #334155; color: #e2e8f0; border-color: #475569; }
+  .user-badge { background: #334155; color: #e2e8f0; }
+  .comment-author-name { color: #e2e8f0; }
+  .card-activity-highlight { border-color: #f59e0b !important; }
 }

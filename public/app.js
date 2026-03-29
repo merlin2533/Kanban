@@ -33,6 +33,47 @@ async function performUndo() {
 // Auth check - before DOMContentLoaded
 let currentUser = null;
 let currentPermission = 'view';
+let guestName = ''; // For access-link users
+
+function getGuestName() {
+  return guestName || localStorage.getItem('kanban_guest_name') || '';
+}
+
+function setGuestName(name) {
+  guestName = name;
+  localStorage.setItem('kanban_guest_name', name);
+}
+
+function getCurrentUsername() {
+  if (currentUser) return currentUser.username;
+  return getGuestName();
+}
+
+// Show guest name dialog and return a promise
+function promptGuestName() {
+  return new Promise((resolve) => {
+    const stored = localStorage.getItem('kanban_guest_name');
+    if (stored) {
+      guestName = stored;
+      resolve(stored);
+      return;
+    }
+    const overlay = document.getElementById('guestNameOverlay');
+    const input = document.getElementById('guestNameInput');
+    const btn = document.getElementById('guestNameBtn');
+    overlay.classList.remove('hidden');
+    input.focus();
+    const submit = () => {
+      const name = input.value.trim();
+      if (!name) { input.focus(); return; }
+      setGuestName(name);
+      overlay.classList.add('hidden');
+      resolve(name);
+    };
+    btn.onclick = submit;
+    input.onkeydown = (e) => { if (e.key === 'Enter') submit(); };
+  });
+}
 
 async function checkAuth() {
   console.log('[AUTH] app.js checkAuth: starting for board:', boardId);
@@ -51,9 +92,13 @@ async function checkAuth() {
       } else {
         const boardRes = await fetch(`/api/boards/${boardId}?token=${token}`);
         if (boardRes.ok) {
-          currentPermission = 'view';
           window._accessToken = token;
+          // Permission is enforced server-side; enable edit UI
+          // (server rejects writes if link is view-only)
+          currentPermission = 'edit';
           console.log('[AUTH] app.js checkAuth: board access token valid');
+          // Prompt for guest name
+          await promptGuestName();
         } else {
           console.warn('[AUTH] app.js checkAuth: token invalid, redirecting to login');
           window.location.href = '/login.html?redirect=' + encodeURIComponent(window.location.pathname);
@@ -103,10 +148,47 @@ document.addEventListener('DOMContentLoaded', async () => {
   setupModal();
   setupBoardSwitcher();
 
+  // Show current user name badge in header
+  const username = getCurrentUsername();
+  if (username) {
+    const userBadge = document.createElement('div');
+    userBadge.className = 'user-badge';
+    userBadge.title = 'Angemeldet als ' + username;
+    const userDot = document.createElement('span');
+    userDot.className = 'user-badge-dot';
+    userDot.textContent = username.charAt(0).toUpperCase();
+    userDot.style.background = stringToColor(username);
+    userBadge.appendChild(userDot);
+    const userLabel = document.createElement('span');
+    userLabel.textContent = username;
+    userBadge.appendChild(userLabel);
+    // For guests, allow clicking to change name
+    if (!currentUser) {
+      userBadge.style.cursor = 'pointer';
+      userBadge.onclick = async () => {
+        const newName = prompt('Name ändern:', getGuestName());
+        if (newName && newName.trim()) {
+          setGuestName(newName.trim());
+          userLabel.textContent = newName.trim();
+          userDot.textContent = newName.trim().charAt(0).toUpperCase();
+          userDot.style.background = stringToColor(newName.trim());
+          userBadge.title = 'Angemeldet als ' + newName.trim();
+        }
+      };
+    }
+    document.querySelector('header').insertBefore(userBadge, document.querySelector('.header-actions'));
+  }
+
   // SSE real-time sync
-  const sseUrl = `/api/boards/${boardId}/events` + (window._accessToken ? `?token=${window._accessToken}` : '');
+  let sseParams = [];
+  if (window._accessToken) sseParams.push('token=' + window._accessToken);
+  const guest = getGuestName();
+  if (guest && !currentUser) sseParams.push('guest=' + encodeURIComponent(guest));
+  const sseUrl = `/api/boards/${boardId}/events` + (sseParams.length ? '?' + sseParams.join('&') : '');
   const eventSource = new EventSource(sseUrl);
   let sseDebounceTimer = null;
+  // Track cards modified by others for activity highlighting
+  const modifiedCards = new Set();
   eventSource.onmessage = (e) => {
     const event = JSON.parse(e.data);
     if (event.type === 'presence') {
@@ -114,6 +196,10 @@ document.addEventListener('DOMContentLoaded', async () => {
       return;
     }
     if (event.type === 'update') {
+      // Track which cards were modified by other users
+      if (event.cardId && event.user && event.user !== getCurrentUsername()) {
+        modifiedCards.add(Number(event.cardId));
+      }
       clearTimeout(sseDebounceTimer);
       sseDebounceTimer = setTimeout(() => {
         // Don't reload while modal is open - queue it
@@ -426,6 +512,11 @@ async function api(url, method = 'GET', body = null) {
   }
   const opts = { method, headers: {} };
   opts.headers['X-Requested-With'] = 'kanban';
+  // Send guest name for access-link users
+  const guest = getGuestName();
+  if (guest && !currentUser) {
+    opts.headers['X-Guest-Name'] = guest;
+  }
   if (body && !(body instanceof FormData)) {
     opts.headers['Content-Type'] = 'application/json';
     opts.body = JSON.stringify(body);
@@ -776,6 +867,11 @@ function createCardEl(card) {
   div.dataset.columnId = card.column_id;
   div.dataset.position = card.position;
 
+  // Activity highlighting: if card was modified by someone else
+  if (modifiedCards.has(card.id)) {
+    div.classList.add('card-activity-highlight');
+  }
+
   // Label dots
   if (card.labels && card.labels.length > 0) {
     const dots = document.createElement('div');
@@ -841,6 +937,14 @@ function createCardEl(card) {
     hasMeta = true;
   }
 
+  if (card.comments && card.comments.length > 0) {
+    const commentSpan = document.createElement('span');
+    commentSpan.textContent = `\uD83D\uDCAC ${card.comments.length}`;
+    commentSpan.title = 'Kommentare';
+    meta.appendChild(commentSpan);
+    hasMeta = true;
+  }
+
   if (card.assignees && card.assignees.length > 0) {
     const assigneeSpan = document.createElement('span');
     assigneeSpan.className = 'card-assignees';
@@ -856,6 +960,16 @@ function createCardEl(card) {
     hasMeta = true;
   }
 
+  // Show creator
+  if (card.created_by) {
+    const creatorSpan = document.createElement('span');
+    creatorSpan.className = 'card-creator';
+    creatorSpan.textContent = card.created_by;
+    creatorSpan.title = 'Erstellt von ' + card.created_by;
+    meta.appendChild(creatorSpan);
+    hasMeta = true;
+  }
+
   if (hasMeta) div.appendChild(meta);
 
   if (card.priority) {
@@ -866,6 +980,9 @@ function createCardEl(card) {
   // Click to open modal
   div.onclick = (e) => {
     if (e.target.closest('.card-thumbnail')) return;
+    // Dismiss activity highlight when card is opened
+    modifiedCards.delete(card.id);
+    div.classList.remove('card-activity-highlight');
     openCardModal(card);
   };
 
@@ -1736,25 +1853,26 @@ async function checkNewActivity() {
 }
 
 function formatAction(action, details) {
+  const user = details.user ? `<span class="activity-user">${esc(details.user)}</span> ` : '';
   const actions = {
-    board_created: () => `Board <strong>${esc(details.title)}</strong> erstellt`,
-    column_created: () => `Spalte <strong>${esc(details.title)}</strong> hinzugefügt`,
-    column_updated: () => `Spalte umbenannt zu <strong>${esc(details.title)}</strong>`,
-    column_deleted: () => `Spalte <strong>${esc(details.title)}</strong> gelöscht`,
-    card_created: () => `Karte <strong>${esc(details.text)}</strong> in ${esc(details.columnTitle)} erstellt`,
-    card_updated: () => `Karte bearbeitet: <strong>${esc(details.text)}</strong>`,
-    card_deleted: () => `Karte <strong>${esc(details.text)}</strong> gelöscht`,
-    card_moved: () => `Karte <strong>${esc(details.text)}</strong> von ${esc(details.from)} nach ${esc(details.to)} verschoben`,
-    card_archived: () => `Karte <strong>${esc(details.text)}</strong> archiviert`,
-    card_restored: () => `Karte <strong>${esc(details.text)}</strong> wiederhergestellt`,
-    comment_added: () => `Kommentar zu <strong>${esc(details.cardText)}</strong>: "${esc((details.commentText || '').slice(0, 50))}"`,
-    board_updated: () => `Board umbenannt zu <strong>${esc(details.title)}</strong>`,
-    board_imported: () => `Board <strong>${esc(details.title)}</strong> importiert`,
-    column_moved: () => `Spalte verschoben`,
-    access_link_created: () => `Zugriffs-Link erstellt (${esc(details.permission)})`,
-    file_uploaded: () => `Datei <strong>${esc(details.filename)}</strong> hochgeladen`,
-    checklist_item_added: () => `Checklist-Item zu <strong>${esc(details.cardText)}</strong> hinzugefügt`,
-    checklist_item_updated: () => `Checklist-Item in <strong>${esc(details.cardText)}</strong> aktualisiert`,
+    board_created: () => `${user}Board <strong>${esc(details.title)}</strong> erstellt`,
+    column_created: () => `${user}Spalte <strong>${esc(details.title)}</strong> hinzugefügt`,
+    column_updated: () => `${user}Spalte umbenannt zu <strong>${esc(details.title)}</strong>`,
+    column_deleted: () => `${user}Spalte <strong>${esc(details.title)}</strong> gelöscht`,
+    card_created: () => `${user}Karte <strong>${esc(details.text)}</strong> in ${esc(details.columnTitle)} erstellt`,
+    card_updated: () => `${user}Karte bearbeitet: <strong>${esc(details.text)}</strong>`,
+    card_deleted: () => `${user}Karte <strong>${esc(details.text)}</strong> gelöscht`,
+    card_moved: () => `${user}Karte <strong>${esc(details.text)}</strong> von ${esc(details.from)} nach ${esc(details.to)} verschoben`,
+    card_archived: () => `${user}Karte <strong>${esc(details.text)}</strong> archiviert`,
+    card_restored: () => `${user}Karte <strong>${esc(details.text)}</strong> wiederhergestellt`,
+    comment_added: () => `${user}Kommentar zu <strong>${esc(details.cardText)}</strong>: "${esc((details.commentText || '').slice(0, 50))}"`,
+    board_updated: () => `${user}Board umbenannt zu <strong>${esc(details.title)}</strong>`,
+    board_imported: () => `${user}Board <strong>${esc(details.title)}</strong> importiert`,
+    column_moved: () => `${user}Spalte verschoben`,
+    access_link_created: () => `${user}Zugriffs-Link erstellt (${esc(details.permission)})`,
+    file_uploaded: () => `${user}Datei <strong>${esc(details.filename)}</strong> hochgeladen`,
+    checklist_item_added: () => `${user}Checklist-Item zu <strong>${esc(details.cardText)}</strong> hinzugefügt`,
+    checklist_item_updated: () => `${user}Checklist-Item in <strong>${esc(details.cardText)}</strong> aktualisiert`,
   };
   return (actions[action] || (() => esc(action)))();
 }
@@ -1782,9 +1900,26 @@ function renderComments(comments) {
   if (!container) return;
   container.innerHTML = '';
 
+  // Comments are already sorted newest first from the API
   for (const comment of comments) {
     const item = document.createElement('div');
     item.className = 'comment-item';
+
+    // Author header
+    if (comment.author) {
+      const authorDiv = document.createElement('div');
+      authorDiv.className = 'comment-author';
+      const authorDot = document.createElement('span');
+      authorDot.className = 'comment-author-dot';
+      authorDot.textContent = comment.author.charAt(0).toUpperCase();
+      authorDot.style.background = stringToColor(comment.author);
+      authorDiv.appendChild(authorDot);
+      const authorName = document.createElement('span');
+      authorName.className = 'comment-author-name';
+      authorName.textContent = comment.author;
+      authorDiv.appendChild(authorName);
+      item.appendChild(authorDiv);
+    }
 
     const text = document.createElement('div');
     text.className = 'comment-text';

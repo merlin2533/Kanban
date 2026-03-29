@@ -358,12 +358,14 @@ app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
   if (!sseClients.has(boardId)) sseClients.set(boardId, new Set());
   sseClients.get(boardId).add(res);
 
-  // Track presence
-  if (req.user) {
+  // Track presence (authenticated users and guests with name)
+  const presenceUser = req.user ? req.user.username : (req.query.guest || '');
+  if (presenceUser) {
     if (!boardPresence.has(boardId)) boardPresence.set(boardId, new Map());
-    boardPresence.get(boardId).set(req.user.username, { username: req.user.username, connectedAt: new Date().toISOString() });
+    boardPresence.get(boardId).set(presenceUser, { username: presenceUser, connectedAt: new Date().toISOString() });
     broadcast(boardId, { type: 'presence', users: [...(boardPresence.get(boardId) || new Map()).values()] });
   }
+  req._presenceUser = presenceUser;
 
   // SSE keepalive every 30s to prevent proxy timeouts
   const keepalive = setInterval(() => {
@@ -377,10 +379,10 @@ app.get('/api/boards/:boardId/events', authMiddleware, (req, res) => {
       clients.delete(res);
       if (clients.size === 0) sseClients.delete(boardId);
     }
-    if (req.user) {
+    if (req._presenceUser) {
       const presence = boardPresence.get(boardId);
       if (presence) {
-        presence.delete(req.user.username);
+        presence.delete(req._presenceUser);
         if (presence.size === 0) boardPresence.delete(boardId);
         else broadcast(boardId, { type: 'presence', users: [...presence.values()] });
       }
@@ -547,6 +549,15 @@ app.put('/api/columns/:columnId/move', authMiddleware, requireEdit, (req, res) =
   res.json(col);
 });
 
+// --- Helper: get username from request ---
+function getRequestUser(req) {
+  if (req.user) return req.user.username;
+  // Guest name passed via header (for access-link users)
+  const guest = req.headers['x-guest-name'];
+  if (guest && typeof guest === 'string') return guest.trim().slice(0, 100);
+  return '';
+}
+
 // --- Cards ---
 app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, (req, res) => {
   const columnId = validId(req.params.columnId);
@@ -558,10 +569,11 @@ app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, (req, res)
   } else {
     text = 'New Card';
   }
-  const card = db.createCard(columnId, text);
+  const createdBy = getRequestUser(req);
+  const card = db.createCard(columnId, text, createdBy);
   if (!card) return res.status(404).json({ error: 'Column not found' });
   const boardId = db.getColumnBoardId(columnId);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_created' });
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_created', user: createdBy });
   res.status(201).json(card);
 });
 
@@ -594,7 +606,8 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated' });
+  const user = getRequestUser(req);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated', cardId: id, user });
   res.json(card);
 });
 
@@ -624,7 +637,8 @@ app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
   if (!card) return res.status(404).json({ error: 'Card not found' });
   // After move, card.column_id is the target column; look up boardId from there
   const boardId = db.getColumnBoardId(card.column_id);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_moved' });
+  const user = getRequestUser(req);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'card_moved', cardId: id, user });
   res.json(card);
 });
 
@@ -704,10 +718,11 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, (req, res) 
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const text = validString(req.body.text, 5000);
   if (!text) return res.status(400).json({ error: 'text required' });
-  const comment = db.createComment(id, text);
+  const author = getRequestUser(req);
+  const comment = db.createComment(id, text, author);
   if (!comment) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created' });
+  if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created', cardId: id, user: author });
   res.status(201).json(comment);
 });
 
