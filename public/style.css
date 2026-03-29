@@ -458,6 +458,14 @@ main#board {
   margin-bottom: 8px;
 }
 
+.md-image {
+  max-width: 100%;
+  border-radius: 6px;
+  margin: 6px 0;
+  display: block;
+  cursor: zoom-in;
+}
+
 .attachment-thumb {
   width: 48px;
   height: 48px;
