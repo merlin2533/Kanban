@@ -107,6 +107,34 @@
     .user-badge.admin { background: #f5f3ff; color: #7c3aed; }
     .user-badge.user { background: #f1f5f9; color: #64748b; }
 
+    /* Board access tags in user row */
+    .user-boards {
+      flex: 1; min-width: 160px; display: flex; flex-wrap: wrap;
+      gap: 4px; padding: 0 12px; align-items: center;
+    }
+    .user-board-tag {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      background: #eff6ff; color: #2563eb; border: 1px solid #bfdbfe;
+      font-size: 12px; font-weight: 500;
+    }
+    .user-boards-empty { font-size: 12px; color: #94a3b8; font-style: italic; }
+
+    /* Board checkboxes in create form */
+    .board-check-section { margin-top: 12px; }
+    .board-check-section .section-label {
+      font-size: 13px; font-weight: 500; color: #475569; display: block; margin-bottom: 6px;
+    }
+    .board-check-list { display: flex; flex-wrap: wrap; gap: 6px; }
+    .board-check-label {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 4px 10px; border-radius: 8px; border: 1px solid #e2e8f0;
+      cursor: pointer; font-size: 13px; color: #475569; background: #f8fafc;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .board-check-label:hover { border-color: #93c5fd; background: #eff6ff; }
+    .board-check-label input[type=checkbox]:checked + span { color: #1d4ed8; }
+    .board-check-label:has(input:checked) { border-color: #2563eb; background: #eff6ff; }
+
     /* Form elements */
     .form-row {
       display: flex;
@@ -236,6 +264,12 @@
       .board-access-item { border-color: #334155; }
       .board-access-header strong { color: #e2e8f0; }
       .member-tag { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
+      .user-board-tag { background: #1e3a5f; color: #93c5fd; border-color: #2563eb; }
+      .user-boards-empty { color: #64748b; }
+      .board-check-label { background: #1e293b; border-color: #475569; color: #94a3b8; }
+      .board-check-label:hover { border-color: #3b82f6; background: #1e3a5f; }
+      .board-check-label:has(input:checked) { border-color: #3b82f6; background: #1e3a5f; }
+      .board-check-label input[type=checkbox]:checked + span { color: #93c5fd; }
       .board-download-item { border-color: #334155; }
       .board-download-info { color: #e2e8f0; }
       .btn-download { background: #0a2e1a; color: #4ade80; border-color: #166534; }
@@ -304,6 +338,10 @@
           <input type="password" class="form-input" id="newUserPassword" placeholder="Passwort (min. 6)" required>
           <label class="checkbox-label"><input type="checkbox" id="newUserAdmin"> Admin</label>
           <button class="btn-primary" id="addUserBtn">Erstellen</button>
+        </div>
+        <div class="board-check-section" id="newUserBoardsSection" style="display:none;">
+          <span class="section-label">Board-Zugriff vergeben (optional):</span>
+          <div class="board-check-list" id="newUserBoards"></div>
         </div>
         <div class="form-error" id="addUserError"></div>
         <div class="form-success" id="addUserSuccess"></div>
@@ -404,6 +442,7 @@
         loadBoardAccess();
         loadBoardDownloads();
         loadSettings();
+        loadNewUserBoardOptions();
       } catch { window.location.href = '/login.html'; }
     }
 
@@ -420,10 +459,68 @@
       });
     });
 
+    // --- Board checkboxes for new user form ---
+    async function loadNewUserBoardOptions() {
+      const res = await fetch('/api/boards');
+      const boards = await res.json();
+      const container = document.getElementById('newUserBoards');
+      const section = document.getElementById('newUserBoardsSection');
+      container.innerHTML = '';
+      if (boards.length === 0) {
+        section.style.display = 'none';
+        return;
+      }
+      section.style.display = 'block';
+      for (const board of boards) {
+        const label = document.createElement('label');
+        label.className = 'board-check-label';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = board.id;
+        const span = document.createElement('span');
+        span.textContent = board.title;
+        label.appendChild(cb);
+        label.appendChild(span);
+        container.appendChild(label);
+      }
+    }
+
+    // Hide board selection when Admin checkbox is checked (admins have all access)
+    document.getElementById('newUserAdmin').addEventListener('change', function() {
+      const section = document.getElementById('newUserBoardsSection');
+      if (this.checked) {
+        section.style.display = 'none';
+      } else {
+        const hasBoards = document.querySelectorAll('#newUserBoards input').length > 0;
+        section.style.display = hasBoards ? 'block' : 'none';
+      }
+    });
+
     // --- Users ---
     async function loadUsers() {
-      const res = await fetch('/api/admin/users');
-      const users = await res.json();
+      const [usersRes, boardsRes] = await Promise.all([
+        fetch('/api/admin/users'),
+        fetch('/api/boards')
+      ]);
+      const users = await usersRes.json();
+      const allBoards = await boardsRes.json();
+
+      // Build user→boards mapping from all board member lists
+      const userBoardsMap = {};
+      if (allBoards.length > 0) {
+        const memberResults = await Promise.all(
+          allBoards.map(b => fetch('/api/boards/' + b.id + '/members').then(r => r.json()))
+        );
+        allBoards.forEach((board, i) => {
+          for (const m of memberResults[i]) {
+            if (!m.is_admin) {
+              if (!userBoardsMap[m.id]) userBoardsMap[m.id] = [];
+              userBoardsMap[m.id].push(board.title);
+            }
+          }
+        });
+      }
+
       const list = document.getElementById('userList');
       list.innerHTML = '';
 
@@ -454,6 +551,27 @@
         info.appendChild(badge);
 
         row.appendChild(info);
+
+        // Show board access for non-admin users
+        if (!user.is_admin) {
+          const boardsDiv = document.createElement('div');
+          boardsDiv.className = 'user-boards';
+          const userBoards = userBoardsMap[user.id] || [];
+          if (userBoards.length === 0) {
+            const emptySpan = document.createElement('span');
+            emptySpan.className = 'user-boards-empty';
+            emptySpan.textContent = 'Kein Board-Zugriff';
+            boardsDiv.appendChild(emptySpan);
+          } else {
+            for (const title of userBoards) {
+              const tag = document.createElement('span');
+              tag.className = 'user-board-tag';
+              tag.textContent = title;
+              boardsDiv.appendChild(tag);
+            }
+          }
+          row.appendChild(boardsDiv);
+        }
 
         if (user.id !== currentUser.id) {
           const del = document.createElement('button');
@@ -491,10 +609,22 @@
         body: JSON.stringify({ username, password, is_admin: isAdmin })
       });
       if (res.ok) {
+        const newUser = await res.json();
+        // Assign user to selected boards
+        const checkedBoards = Array.from(document.querySelectorAll('#newUserBoards input[type=checkbox]:checked'));
+        for (const cb of checkedBoards) {
+          await fetch('/api/boards/' + cb.value + '/members', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+            body: JSON.stringify({ user_id: newUser.id })
+          });
+          cb.checked = false;
+        }
         document.getElementById('newUsername').value = '';
         document.getElementById('newUserPassword').value = '';
         document.getElementById('newUserAdmin').checked = false;
-        okEl.textContent = 'Benutzer "' + username + '" erstellt!';
+        const boardCount = checkedBoards.length;
+        okEl.textContent = 'Benutzer "' + username + '" erstellt' + (boardCount > 0 ? ' und ' + boardCount + ' Board(s) zugewiesen' : '') + '!';
         okEl.style.display = 'block';
         setTimeout(() => okEl.style.display = 'none', 3000);
         loadUsers();
