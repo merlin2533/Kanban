@@ -2057,3 +2057,9 @@ main#board {
 .dep-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
 .dep-card-text { flex: 1; color: #334155; }
 .dep-column { font-size: 11px; color: #94a3b8; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+
+.notif-prefs-list { display: flex; flex-direction: column; gap: 8px; }
+.notif-pref-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+.notif-pref-label { font-size: 14px; color: #334155; }
+.notif-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; cursor: pointer; }
+.notif-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }

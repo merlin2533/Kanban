@@ -299,6 +299,28 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Notification Preferences ---
+app.get('/api/me/notification-prefs', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  res.json(db.getNotificationPrefs(req.user.id));
+});
+
+app.put('/api/me/notification-prefs', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const { event_type, email_enabled } = req.body;
+  try {
+    db.setNotificationPref(req.user.id, event_type, !!email_enabled);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/me/notification-event-types', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  res.json(db.NOTIFICATION_EVENT_TYPES);
+});
+
 // --- Admin ---
 app.get('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   res.json(db.getUsers());

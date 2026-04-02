@@ -173,6 +173,13 @@ db.exec(`
   );
   CREATE INDEX IF NOT EXISTS idx_deps_blocking ON card_dependencies(blocking_card_id);
   CREATE INDEX IF NOT EXISTS idx_deps_blocked ON card_dependencies(blocked_card_id);
+
+  CREATE TABLE IF NOT EXISTS notification_prefs (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    email_enabled INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, event_type)
+  );
 `);
 
 // Migration: populate board_members for existing boards/users (backward compatibility)
@@ -1330,6 +1337,29 @@ function getBlockedCardIds(boardId) {
   `).all(boardId).map(r => r.id);
 }
 
+// --- Notification Preferences ---
+
+const NOTIFICATION_EVENT_TYPES = [
+  'card_created', 'card_assigned', 'card_due_soon',
+  'comment_added', 'card_archived', 'board_updated'
+];
+
+function getNotificationPrefs(userId) {
+  const rows = db.prepare('SELECT * FROM notification_prefs WHERE user_id = ?').all(userId);
+  const prefs = {};
+  for (const et of NOTIFICATION_EVENT_TYPES) {
+    const row = rows.find(r => r.event_type === et);
+    prefs[et] = { email_enabled: row ? !!row.email_enabled : false };
+  }
+  return prefs;
+}
+
+function setNotificationPref(userId, eventType, emailEnabled) {
+  if (!NOTIFICATION_EVENT_TYPES.includes(eventType)) throw new Error('Invalid event type');
+  db.prepare('INSERT OR REPLACE INTO notification_prefs (user_id, event_type, email_enabled) VALUES (?, ?, ?)')
+    .run(userId, eventType, emailEnabled ? 1 : 0);
+}
+
 // --- Raw DB access ---
 
 function getDb() { return db; }
@@ -1381,6 +1411,8 @@ module.exports = {
   getBoardPublicAccess, setBoardPublicAccess,
   // Card Dependencies
   getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
+  // Notification Preferences
+  getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
   // Raw DB
   getDb,
 };
