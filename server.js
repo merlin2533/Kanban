@@ -397,7 +397,9 @@ function triggerWebhooks(boardId, event) {
       req.on('error', () => {});
       req.write(payload);
       req.end();
-    } catch {}
+    } catch (e) {
+      console.error('[WEBHOOK] Failed to deliver webhook to', wh.url, e);
+    }
   }
 }
 
@@ -1250,6 +1252,10 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = err.status || 500;
   res.status(status).json({ error: err.message || 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[UNHANDLED REJECTION]', reason);
 });
 
 // --- Start ---
