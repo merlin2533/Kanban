@@ -1286,6 +1286,39 @@ function createCardEl(card) {
   textDiv.textContent = card.text;
   div.appendChild(textDiv);
 
+  // Double-click for inline quick-edit
+  textDiv.ondblclick = (e) => {
+    if (!canEdit()) return;
+    e.stopPropagation(); // prevent card click/navigation
+    const input = document.createElement('input');
+    input.className = 'card-quick-edit-input';
+    input.value = card.text;
+    textDiv.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+      const newText = input.value.trim();
+      if (newText && newText !== card.text) {
+        try {
+          await api(`/api/cards/${card.id}`, 'PATCH', { text: newText });
+          card.text = newText;
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+      input.replaceWith(textDiv);
+      textDiv.textContent = card.text;
+    };
+
+    input.onblur = save;
+    input.onkeydown = (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = card.text; input.blur(); }
+      ev.stopPropagation();
+    };
+  };
+
   // Meta indicators
   const meta = document.createElement('div');
   meta.className = 'card-meta';

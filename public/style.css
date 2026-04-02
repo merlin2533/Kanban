@@ -240,6 +240,10 @@ main#board {
 }
 
 .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.card.kb-focused {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
 .card:active { cursor: grabbing; }
 
 .card.dragging {
@@ -251,6 +255,23 @@ main#board {
   font-size: 14px;
   line-height: 1.4;
   word-break: break-word;
+}
+.card-quick-edit-input {
+  width: 100%;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: 0;
+  box-sizing: border-box;
+}
+.dark .card-quick-edit-input {
+  background: #1e293b;
+  color: #e2e8f0;
 }
 
 .card-meta {
