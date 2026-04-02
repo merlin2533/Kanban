@@ -1225,6 +1225,111 @@ main#board {
   outline: 2px solid #2563eb;
 }
 
+/* --- Advanced Filter Panel --- */
+.adv-filter-panel {
+  position: absolute;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 9999;
+  min-width: 260px;
+}
+
+.adv-filter-section {
+  margin-bottom: 10px;
+}
+
+.adv-filter-section:last-child {
+  margin-bottom: 0;
+}
+
+.adv-filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.adv-filter-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.adv-filter-btn {
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.adv-filter-btn:hover {
+  background: #e2e8f0;
+}
+
+.adv-filter-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.adv-filter-btn.priority-high.active { background: #dc2626; border-color: #dc2626; }
+.adv-filter-btn.priority-medium.active { background: #f59e0b; border-color: #f59e0b; }
+.adv-filter-btn.priority-low.active { background: #22c55e; border-color: #22c55e; }
+.adv-filter-btn.priority-high:not(.active) { color: #dc2626; border-color: #fca5a5; }
+.adv-filter-btn.priority-medium:not(.active) { color: #d97706; border-color: #fcd34d; }
+.adv-filter-btn.priority-low:not(.active) { color: #16a34a; border-color: #86efac; }
+
+.adv-filter-clear {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.adv-filter-clear:hover {
+  background: #e2e8f0;
+}
+
+#advFilterBtn.filter-active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+  position: relative;
+}
+
+#advFilterBtn.filter-active::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  background: #2563eb;
+  border-radius: 50%;
+}
+
+/* Dark mode for adv filter panel */
+@media (prefers-color-scheme: dark) {
+  .adv-filter-panel { background: #1e293b; border-color: #475569; }
+  .adv-filter-btn { background: #334155; border-color: #475569; color: #e2e8f0; }
+  .adv-filter-btn:hover { background: #475569; }
+  .adv-filter-clear { background: #334155; border-color: #475569; color: #94a3b8; }
+  .adv-filter-clear:hover { background: #475569; }
+}
+
 /* --- Board List (index page) --- */
 .board-list {
   text-align: left;

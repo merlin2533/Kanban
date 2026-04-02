@@ -4,6 +4,10 @@ let board = null;
 let currentCardId = null;
 const modifiedCards = new Set();
 
+// --- Advanced Filter State ---
+let activePriorityFilter = null; // null | 'high' | 'medium' | 'low'
+let activeDueFilter = null;      // null | 'overdue' | 'today' | 'week' | 'none'
+
 // --- Undo Stack ---
 const undoStack = [];
 const MAX_UNDO = 20;
@@ -348,8 +352,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function hideSearchResults() {
     if (searchResultsContainer) searchResultsContainer.classList.add('hidden');
-    // Also restore all cards visibility
-    document.querySelectorAll('.card').forEach(c => c.style.display = '');
+    // Restore card visibility respecting active filters
+    if (window._filterCards) {
+      window._filterCards();
+    } else {
+      document.querySelectorAll('.card').forEach(c => c.style.display = '');
+    }
   }
 
   searchInput.oninput = () => {
@@ -393,18 +401,152 @@ document.addEventListener('DOMContentLoaded', async () => {
   labelFilter.innerHTML = '<option value="">Alle Labels</option>';
   document.querySelector('header').insertBefore(labelFilter, document.querySelector('.header-actions'));
 
-  labelFilter.onchange = () => {
+  labelFilter.onchange = () => filterCards();
+
+  // filterCards: applies label, priority, and due date filters simultaneously
+  function filterCards() {
     const selectedLabel = labelFilter.value;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+
     document.querySelectorAll('.card').forEach(card => {
-      if (!selectedLabel) {
-        card.style.display = '';
-        return;
+      // Label filter
+      if (selectedLabel) {
+        const dots = card.querySelectorAll('.card-label-dot');
+        if (![...dots].some(dot => dot.title === selectedLabel)) {
+          card.style.display = 'none';
+          return;
+        }
       }
-      const dots = card.querySelectorAll('.card-label-dot');
-      const hasLabel = [...dots].some(dot => dot.title === selectedLabel);
-      card.style.display = hasLabel ? '' : 'none';
+
+      // Priority filter
+      if (activePriorityFilter) {
+        if (card.dataset.priority !== activePriorityFilter) {
+          card.style.display = 'none';
+          return;
+        }
+      }
+
+      // Due date filter
+      if (activeDueFilter) {
+        const dueDateStr = card.dataset.dueDate;
+        if (activeDueFilter === 'none') {
+          if (dueDateStr) { card.style.display = 'none'; return; }
+        } else {
+          if (!dueDateStr) { card.style.display = 'none'; return; }
+          const due = new Date(dueDateStr);
+          due.setHours(0, 0, 0, 0);
+          if (activeDueFilter === 'overdue') {
+            if (due >= today) { card.style.display = 'none'; return; }
+          } else if (activeDueFilter === 'today') {
+            if (due.getTime() !== today.getTime()) { card.style.display = 'none'; return; }
+          } else if (activeDueFilter === 'week') {
+            if (due < today || due >= weekEnd) { card.style.display = 'none'; return; }
+          }
+        }
+      }
+
+      card.style.display = '';
     });
+
+    // Update filter button indicator
+    const hasActiveFilter = selectedLabel || activePriorityFilter || activeDueFilter;
+    const filterBtn = document.getElementById('advFilterBtn');
+    if (filterBtn) {
+      if (hasActiveFilter) {
+        filterBtn.classList.add('filter-active');
+      } else {
+        filterBtn.classList.remove('filter-active');
+      }
+    }
+  }
+
+  // Advanced filter panel
+  const advFilterBtn = document.createElement('button');
+  advFilterBtn.className = 'icon-btn';
+  advFilterBtn.id = 'advFilterBtn';
+  advFilterBtn.innerHTML = '&#9878;'; // filter funnel symbol
+  advFilterBtn.title = 'Erweiterte Filter';
+  document.querySelector('header').insertBefore(advFilterBtn, document.querySelector('.header-actions'));
+
+  const advFilterPanel = document.createElement('div');
+  advFilterPanel.className = 'adv-filter-panel hidden';
+  advFilterPanel.id = 'advFilterPanel';
+  advFilterPanel.innerHTML = `
+    <div class="adv-filter-section">
+      <div class="adv-filter-label">Priorität</div>
+      <div class="adv-filter-btns" id="priorityFilterBtns">
+        <button class="adv-filter-btn active" data-value="">Alle</button>
+        <button class="adv-filter-btn priority-high" data-value="high">Hoch</button>
+        <button class="adv-filter-btn priority-medium" data-value="medium">Mittel</button>
+        <button class="adv-filter-btn priority-low" data-value="low">Niedrig</button>
+      </div>
+    </div>
+    <div class="adv-filter-section">
+      <div class="adv-filter-label">Fälligkeit</div>
+      <div class="adv-filter-btns" id="dueFilterBtns">
+        <button class="adv-filter-btn active" data-value="">Alle</button>
+        <button class="adv-filter-btn" data-value="overdue">Überfällig</button>
+        <button class="adv-filter-btn" data-value="today">Heute</button>
+        <button class="adv-filter-btn" data-value="week">Diese Woche</button>
+        <button class="adv-filter-btn" data-value="none">Ohne Datum</button>
+      </div>
+    </div>
+    <div class="adv-filter-section">
+      <button class="adv-filter-clear" id="clearAllFiltersBtn">Alle Filter zurücksetzen</button>
+    </div>
+  `;
+  // Append to body so header overflow:hidden does not clip the panel
+  document.body.appendChild(advFilterPanel);
+
+  function positionFilterPanel() {
+    const rect = advFilterBtn.getBoundingClientRect();
+    advFilterPanel.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+    advFilterPanel.style.left = Math.max(8, rect.right - 260 + window.scrollX) + 'px';
+  }
+
+  advFilterBtn.onclick = (e) => {
+    e.stopPropagation();
+    const isHidden = advFilterPanel.classList.contains('hidden');
+    advFilterPanel.classList.toggle('hidden');
+    if (isHidden) positionFilterPanel();
   };
+
+  document.addEventListener('click', (e) => {
+    if (!advFilterPanel.contains(e.target) && e.target !== advFilterBtn) {
+      advFilterPanel.classList.add('hidden');
+    }
+  });
+
+  document.getElementById('priorityFilterBtns').onclick = (e) => {
+    const btn = e.target.closest('.adv-filter-btn');
+    if (!btn) return;
+    activePriorityFilter = btn.dataset.value || null;
+    document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    filterCards();
+  };
+
+  document.getElementById('dueFilterBtns').onclick = (e) => {
+    const btn = e.target.closest('.adv-filter-btn');
+    if (!btn) return;
+    activeDueFilter = btn.dataset.value || null;
+    document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    filterCards();
+  };
+
+  document.getElementById('clearAllFiltersBtn').onclick = () => {
+    activePriorityFilter = null;
+    activeDueFilter = null;
+    labelFilter.value = '';
+    document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
+    document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
+    filterCards();
+  };
+
+  // Expose filterCards for use after board reload
+  window._filterCards = filterCards;
 
   // Export button
   const exportBtn = document.createElement('button');
@@ -766,6 +908,8 @@ async function loadBoard() {
       }
       lf.value = currentVal;
     }
+    // Re-apply active filters after board re-renders
+    if (window._filterCards) window._filterCards();
     checkNewActivity();
   } catch (e) {
     showError(e.message);
@@ -1089,6 +1233,11 @@ function createCardEl(card) {
   div.dataset.cardId = card.id;
   div.dataset.columnId = card.column_id;
   div.dataset.position = card.position;
+  if (card.priority) div.dataset.priority = card.priority;
+  if (card.due_date) div.dataset.dueDate = card.due_date;
+  if (card.assignees && card.assignees.length > 0) {
+    div.dataset.assignees = card.assignees.map(a => a.username).join(',');
+  }
 
   // Activity highlighting: if card was modified by someone else
   if (modifiedCards.has(card.id)) {
