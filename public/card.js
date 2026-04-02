@@ -528,6 +528,67 @@ function renderAssignees(assignees) {
   }
 }
 
+// --- Card Dependencies ---
+async function loadDependencies() {
+  const deps = await api(`/api/cards/${cardId}/dependencies`);
+  renderDependencies(deps);
+}
+
+function renderDependencies(deps) {
+  let section = document.getElementById('dependenciesSection');
+  if (!section) {
+    section = document.createElement('div');
+    section.id = 'dependenciesSection';
+    section.className = 'card-section';
+    const assigneesSection = document.getElementById('assigneesSection') || document.querySelector('.assignees-section');
+    if (assigneesSection) assigneesSection.after(section);
+    else document.querySelector('.card-detail')?.appendChild(section);
+  }
+
+  section.innerHTML = `<div class="card-field-label">Abhängigkeiten</div>`;
+
+  if (deps.blocking.length > 0) {
+    const blockingDiv = document.createElement('div');
+    blockingDiv.innerHTML = '<div style="font-size:12px;color:#64748b;margin:4px 0;">Blockiert von:</div>';
+    for (const dep of deps.blocking) {
+      const item = document.createElement('div');
+      item.className = 'dep-item';
+      item.innerHTML = `<span class="dep-card-text">${esc(dep.text)}</span><span class="dep-column">${esc(dep.column_title)}</span>`;
+      if (canEdit()) {
+        const rm = document.createElement('button');
+        rm.className = 'remove-label';
+        rm.textContent = '×';
+        rm.onclick = async () => {
+          await api(`/api/cards/${cardId}/dependencies/${dep.id}`, 'DELETE');
+          loadDependencies();
+        };
+        item.appendChild(rm);
+      }
+      blockingDiv.appendChild(item);
+    }
+    section.appendChild(blockingDiv);
+  }
+
+  if (canEdit()) {
+    const addDiv = document.createElement('div');
+    addDiv.style.cssText = 'margin-top:8px;';
+    addDiv.innerHTML = `
+      <input type="number" id="depCardIdInput" placeholder="Karten-ID eingeben..." style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;width:160px;">
+      <button id="addDepBtn" class="btn-secondary" style="margin-left:4px;">+ Blockiert von</button>
+    `;
+    section.appendChild(addDiv);
+    document.getElementById('addDepBtn').onclick = async () => {
+      const blockingId = parseInt(document.getElementById('depCardIdInput').value);
+      if (!blockingId) return;
+      try {
+        await api(`/api/cards/${cardId}/dependencies`, 'POST', { blocking_card_id: blockingId });
+        document.getElementById('depCardIdInput').value = '';
+        loadDependencies();
+      } catch (e) { showError(e.message); }
+    };
+  }
+}
+
 // --- Labels ---
 function renderCardLabels(labels) {
   const container = document.getElementById('cardLabels');
