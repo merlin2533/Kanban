@@ -814,6 +814,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.preventDefault();
       performUndo();
     }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.ctrlKey && !e.metaKey) {
+      const focused = document.activeElement;
+      // Only navigate if no input/textarea is focused
+      if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.isContentEditable)) return;
+      const cards = Array.from(document.querySelectorAll('.card:not([style*="display: none"])'));
+      if (cards.length === 0) return;
+      const current = document.querySelector('.card.kb-focused');
+      let idx = current ? cards.indexOf(current) : -1;
+      if (e.key === 'ArrowDown') idx = Math.min(idx + 1, cards.length - 1);
+      else idx = Math.max(idx - 1, 0);
+      if (current) current.classList.remove('kb-focused');
+      cards[idx].classList.add('kb-focused');
+      cards[idx].scrollIntoView({ block: 'nearest' });
+      e.preventDefault();
+    }
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+      const focused = document.querySelector('.card.kb-focused');
+      if (focused) {
+        const focusedEl = document.activeElement;
+        if (focusedEl && (focusedEl.tagName === 'INPUT' || focusedEl.tagName === 'TEXTAREA')) return;
+        focused.click();
+        e.preventDefault();
+      }
+    }
   });
 });
 
