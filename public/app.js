@@ -2266,6 +2266,50 @@ function setupActivityPanel() {
   }
 }
 
+let activityOffset = 0;
+const ACTIVITY_PAGE_SIZE = 30;
+
+async function loadActivity(append = false) {
+  if (!append) activityOffset = 0;
+  const data = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}&offset=${activityOffset}`);
+
+  // Handle both old array format and new paginated format
+  const items = Array.isArray(data) ? data : (data.items || []);
+  const total = Array.isArray(data) ? items.length : (data.total || items.length);
+
+  const list = document.getElementById('activityList');
+  if (!list) return;
+
+  if (!append) list.innerHTML = '';
+
+  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+
+  if (!append && items.length === 0) {
+    list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
+    activityOffset = 0;
+    return;
+  }
+
+  renderActivityItems(list, items, lastVisit);
+  activityOffset += items.length;
+  const hasMore = activityOffset < total;
+
+  let moreBtn = document.getElementById('activityMoreBtn');
+  if (hasMore) {
+    if (!moreBtn) {
+      moreBtn = document.createElement('button');
+      moreBtn.id = 'activityMoreBtn';
+      moreBtn.className = 'btn-secondary';
+      moreBtn.style.cssText = 'width:100%;margin-top:8px;font-size:13px;';
+      moreBtn.textContent = 'Mehr laden';
+      moreBtn.onclick = () => loadActivity(true);
+      list.after(moreBtn);
+    }
+  } else if (moreBtn) {
+    moreBtn.remove();
+  }
+}
+
 async function toggleActivity() {
   const panel = document.getElementById('activityPanel');
   if (!panel.classList.contains('hidden')) {
@@ -2274,50 +2318,11 @@ async function toggleActivity() {
   }
 
   try {
-    const ACTIVITY_PAGE_SIZE = 50;
-    const activities = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}`);
-    const list = document.getElementById('activityList');
-    list.innerHTML = '';
-
     const lastVisit = localStorage.getItem('lastVisit_' + boardId);
     localStorage.setItem('lastVisit_' + boardId, new Date().toISOString());
     document.getElementById('activityBadge').classList.add('hidden');
 
-    if (activities.length === 0) {
-      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
-    } else {
-      renderActivityItems(list, activities, lastVisit);
-
-      // Load more button if we got a full page
-      if (activities.length >= ACTIVITY_PAGE_SIZE) {
-        const loadMoreBtn = document.createElement('button');
-        loadMoreBtn.className = 'load-more-btn';
-        loadMoreBtn.textContent = 'Mehr laden...';
-        let offset = ACTIVITY_PAGE_SIZE;
-        loadMoreBtn.onclick = async () => {
-          loadMoreBtn.disabled = true;
-          loadMoreBtn.textContent = '...';
-          try {
-            const more = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}&offset=${offset}`);
-            if (more.length > 0) {
-              renderActivityItems(list, more, lastVisit);
-              offset += more.length;
-            }
-            if (more.length < ACTIVITY_PAGE_SIZE) {
-              loadMoreBtn.remove();
-            } else {
-              loadMoreBtn.disabled = false;
-              loadMoreBtn.textContent = 'Mehr laden...';
-            }
-          } catch (e) {
-            showError(e.message);
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.textContent = 'Mehr laden...';
-          }
-        };
-        list.appendChild(loadMoreBtn);
-      }
-    }
+    await loadActivity(false);
 
     panel.classList.remove('hidden');
   } catch (e) {
@@ -2345,13 +2350,7 @@ function renderActivityItems(list, activities, lastVisit) {
     item.appendChild(actionDiv);
     item.appendChild(timeDiv);
 
-    // Insert before the load-more button if it exists
-    const loadMoreBtn = list.querySelector('.load-more-btn');
-    if (loadMoreBtn) {
-      list.insertBefore(item, loadMoreBtn);
-    } else {
-      list.appendChild(item);
-    }
+    list.appendChild(item);
   }
 }
 
@@ -2360,7 +2359,8 @@ async function checkNewActivity() {
   if (!lastVisit) return;
 
   try {
-    const activities = await api(`/api/boards/${boardId}/activity?limit=50`);
+    const data = await api(`/api/boards/${boardId}/activity?limit=50`);
+    const activities = Array.isArray(data) ? data : (data.items || []);
     const newCount = activities.filter(a => a.created_at > lastVisit).length;
 
     const badge = document.getElementById('activityBadge');

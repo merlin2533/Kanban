@@ -883,7 +883,11 @@ app.delete('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => 
 app.get('/api/cards/:cardId/comments', authMiddleware, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  res.json(db.getComments(id));
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const comments = db.getComments(id, limit, offset);
+  const total = db.getCardCommentCount(id);
+  res.json({ comments, total, limit, offset });
 });
 
 app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRateLimit(100), (req, res) => {
@@ -1254,10 +1258,10 @@ app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
-  const rawLimit = Number(req.query.limit) || 50;
-  const limit = Math.min(rawLimit, 200);
-  const offset = Math.max(0, Number(req.query.offset) || 0);
-  res.json(db.getActivity(id, limit, offset));
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const { items, total } = db.getActivity(id, limit, offset);
+  res.json({ items, total, limit, offset });
 });
 
 // --- Admin: App Settings ---

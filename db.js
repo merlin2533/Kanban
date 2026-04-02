@@ -995,8 +995,12 @@ function getArchivedCards(boardId) {
 
 // --- Comments ---
 
-function getComments(cardId) {
-  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at DESC').all(cardId);
+function getComments(cardId, limit = 20, offset = 0) {
+  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?').all(cardId, limit, offset);
+}
+
+function getCardCommentCount(cardId) {
+  return db.prepare('SELECT COUNT(*) as count FROM comments WHERE card_id = ?').get(cardId).count;
 }
 
 function createComment(cardId, text, author) {
@@ -1027,7 +1031,9 @@ function deleteComment(id) {
 function getActivity(boardId, limit = 50, offset = 0) {
   limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
   offset = Math.max(0, parseInt(offset) || 0);
-  return db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(boardId, limit, offset);
+  const items = db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(boardId, limit, offset);
+  const total = db.prepare('SELECT COUNT(*) as count FROM activity_log WHERE board_id = ?').get(boardId).count;
+  return { items, total };
 }
 
 // --- Export/Import ---
@@ -1389,7 +1395,7 @@ module.exports = {
   // Archive
   archiveCard, restoreCard, getArchivedCards,
   // Comments
-  getComments, createComment, updateComment, deleteComment,
+  getComments, getCardCommentCount, createComment, updateComment, deleteComment,
   // Export/Import
   exportBoard, importBoard,
   // Auth
