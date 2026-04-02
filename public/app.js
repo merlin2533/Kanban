@@ -926,6 +926,25 @@ function createColumnEl(col) {
     }
   };
 
+  // Collapse toggle button
+  const collapseBtn = document.createElement('button');
+  collapseBtn.className = 'collapse-col-btn';
+  collapseBtn.title = 'Spalte einklappen';
+
+  const isCollapsed = localStorage.getItem('col_collapsed_' + col.id) === 'true';
+  if (isCollapsed) {
+    div.classList.add('column-collapsed');
+    collapseBtn.textContent = '▸';
+  } else {
+    collapseBtn.textContent = '▾';
+  }
+
+  collapseBtn.onclick = () => {
+    const collapsed = div.classList.toggle('column-collapsed');
+    localStorage.setItem('col_collapsed_' + col.id, collapsed ? 'true' : 'false');
+    collapseBtn.textContent = collapsed ? '▸' : '▾';
+  };
+
   if (!canEditBoard()) {
     titleInput.onclick = null;
     titleInput.readOnly = true;
@@ -959,6 +978,7 @@ function createColumnEl(col) {
 
   header.appendChild(titleInput);
   header.appendChild(count);
+  header.appendChild(collapseBtn);
   header.appendChild(deleteBtn);
 
   // Column drag & drop

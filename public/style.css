@@ -126,6 +126,50 @@ main#board {
   min-height: 200px;
 }
 
+.column.column-collapsed .cards {
+  display: none;
+}
+.column.column-collapsed .add-card-area {
+  display: none;
+}
+.column.column-collapsed {
+  min-width: 48px;
+  width: 48px;
+  max-width: 48px;
+}
+.collapse-col-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+  color: #64748b;
+  border-radius: 4px;
+}
+.collapse-col-btn:hover {
+  background: rgba(0,0,0,0.05);
+}
+.column.column-collapsed .column-header {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.column.column-collapsed .column-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  max-height: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.column.column-collapsed .column-count,
+.column.column-collapsed .wip-badge,
+.column.column-collapsed .delete-col-btn {
+  display: none;
+}
+
 .column-header {
   padding: 12px 16px;
   display: flex;
