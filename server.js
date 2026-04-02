@@ -1098,6 +1098,44 @@ app.delete('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, 
   res.json({ ok: true });
 });
 
+// --- Card Dependencies ---
+app.get('/api/cards/:cardId/dependencies', authMiddleware, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  res.json(db.getCardDependencies(id));
+});
+
+app.post('/api/cards/:cardId/dependencies', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  const blockingId = validId(req.body.blocking_card_id);
+  if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
+  try {
+    db.addCardDependency(blockingId, id);
+    // get board for broadcast
+    const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+    if (card) {
+      const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+      if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_added' });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/cards/:cardId/dependencies/:blockingId', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  const blockingId = validId(req.params.blockingId);
+  if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
+  db.removeCardDependency(blockingId, id);
+  const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+  if (card) {
+    const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+    if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_removed' });
+  }
+  res.json({ ok: true });
+});
+
 // --- Webhooks ---
 app.get('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
   if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });

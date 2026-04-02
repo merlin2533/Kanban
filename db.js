@@ -595,6 +595,7 @@ function getBoard(id) {
 
   board.columns = columns;
   board.labels = db.prepare('SELECT * FROM labels WHERE board_id = ? ORDER BY name').all(id);
+  board.blockedCardIds = getBlockedCardIds(id);
   return board;
 }
 
@@ -1378,6 +1379,8 @@ module.exports = {
   getSetting, setSetting, initSetting, getAllSettings,
   // Public board access
   getBoardPublicAccess, setBoardPublicAccess,
+  // Card Dependencies
+  getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
   // Raw DB
   getDb,
 };

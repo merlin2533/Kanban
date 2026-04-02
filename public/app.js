@@ -1410,6 +1410,25 @@ function createCardEl(card) {
     hasMeta = true;
   }
 
+  if (card.time_estimate || card.time_logged) {
+    const timeBadge = document.createElement('span');
+    timeBadge.className = 'card-time-badge';
+    const est = card.time_estimate ? `~${card.time_estimate}m` : '';
+    const logged = card.time_logged ? `\u2713${card.time_logged}m` : '';
+    timeBadge.textContent = [est, logged].filter(Boolean).join(' ');
+    meta.appendChild(timeBadge);
+    hasMeta = true;
+  }
+
+  if (board.blockedCardIds && board.blockedCardIds.includes(card.id)) {
+    const blockedBadge = document.createElement('span');
+    blockedBadge.className = 'card-blocked-badge';
+    blockedBadge.title = 'Blockiert von einer anderen Karte';
+    blockedBadge.textContent = '🔒';
+    meta.appendChild(blockedBadge);
+    hasMeta = true;
+  }
+
   if (hasMeta) div.appendChild(meta);
 
   if (card.priority) {

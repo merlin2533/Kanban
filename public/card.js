@@ -258,6 +258,15 @@ function renderCardPage() {
   // Due date
   document.getElementById('cardDueDate').value = card.due_date || '';
 
+  // Time tracking
+  const timeEstimateEl = document.getElementById('timeEstimate');
+  const timeLoggedDisplayEl = document.getElementById('timeLoggedDisplay');
+  if (timeEstimateEl) timeEstimateEl.value = card.time_estimate != null ? card.time_estimate : '';
+  if (timeLoggedDisplayEl) {
+    const logged = card.time_logged || 0;
+    timeLoggedDisplayEl.textContent = logged > 0 ? `${logged} Min (${Math.floor(logged/60)}h ${logged%60}m)` : '–';
+  }
+
   // Priority
   document.querySelectorAll('.priority-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.priority === (card.priority || ''));
@@ -275,6 +284,7 @@ function renderCardPage() {
 
   renderAssignees(card.assignees || []);
   renderCardLabels(card.labels || []);
+  loadDependencies();
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
   renderComments(card.comments || []);
@@ -331,6 +341,10 @@ function renderCardPage() {
     document.getElementById('uploadArea').style.display = 'none';
     document.getElementById('addLabelBtn').style.display = 'none';
     document.getElementById('assigneesSection').style.display = 'none';
+    const timeLogRow = document.getElementById('timeLogRow');
+    if (timeLogRow) timeLogRow.style.display = 'none';
+    const timeEstimateEl2 = document.getElementById('timeEstimate');
+    if (timeEstimateEl2) timeEstimateEl2.disabled = true;
   }
 
   // User badge in header
@@ -1092,6 +1106,31 @@ function setupEvents() {
       card.recurrence = e.target.value || null;
     } catch (err) { showError(err.message); }
   };
+
+  // Time estimate save on change
+  const timeEstimateEl = document.getElementById('timeEstimate');
+  if (timeEstimateEl) {
+    timeEstimateEl.onchange = async () => {
+      const val = timeEstimateEl.value === '' ? null : parseInt(timeEstimateEl.value);
+      try { await api(`/api/cards/${cardId}`, 'PATCH', { time_estimate: val }); } catch (e) { showError(e.message); }
+    };
+  }
+
+  // Time log button
+  const timeLogBtn = document.getElementById('timeLogBtn');
+  if (timeLogBtn) {
+    timeLogBtn.onclick = async () => {
+      const mins = parseInt(document.getElementById('timeLogInput').value);
+      if (!mins || mins < 1) return;
+      try {
+        const updated = await api(`/api/cards/${cardId}/log-time`, 'POST', { minutes: mins });
+        document.getElementById('timeLogInput').value = '';
+        const timeLoggedDisplayEl = document.getElementById('timeLoggedDisplay');
+        const logged = updated.time_logged || 0;
+        if (timeLoggedDisplayEl) timeLoggedDisplayEl.textContent = `${logged} Min (${Math.floor(logged/60)}h ${logged%60}m)`;
+      } catch (e) { showError(e.message); }
+    };
+  }
 
   // Close label dropdown on outside click
   document.addEventListener('click', (e) => {
