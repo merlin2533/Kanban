@@ -163,6 +163,16 @@ db.exec(`
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
   );
+
+  CREATE TABLE IF NOT EXISTS card_dependencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blocking_card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    blocked_card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(blocking_card_id, blocked_card_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_deps_blocking ON card_dependencies(blocking_card_id);
+  CREATE INDEX IF NOT EXISTS idx_deps_blocked ON card_dependencies(blocked_card_id);
 `);
 
 // Migration: populate board_members for existing boards/users (backward compatibility)
@@ -274,6 +284,10 @@ try {
 } catch {
   db.exec("ALTER TABLE boards ADD COLUMN public_access TEXT DEFAULT NULL");
 }
+
+// Migration: add time tracking columns to cards
+try { db.prepare('ALTER TABLE cards ADD COLUMN time_estimate INTEGER DEFAULT NULL').run(); } catch {}
+try { db.prepare('ALTER TABLE cards ADD COLUMN time_logged INTEGER DEFAULT NULL').run(); } catch {}
 
 // Card templates table (per-board)
 db.exec(`
@@ -699,8 +713,9 @@ function updateCard(id, updates) {
   const due_date = updates.due_date !== undefined ? updates.due_date : card.due_date;
   const priority = updates.priority !== undefined ? updates.priority : card.priority;
   const recurrence = updates.recurrence !== undefined ? updates.recurrence : card.recurrence;
+  const time_estimate = updates.time_estimate !== undefined ? updates.time_estimate : card.time_estimate;
 
-  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, recurrence = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, recurrence, id);
+  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, recurrence = ?, time_estimate = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, recurrence, time_estimate, id);
 
   const updated = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(updated.column_id);
@@ -1266,6 +1281,54 @@ function getAllSettings() {
   return Object.fromEntries(db.prepare('SELECT key, value FROM app_settings').all().map(r => [r.key, r.value]));
 }
 
+// --- Time Tracking ---
+function logTime(cardId, minutes) {
+  const card = db.prepare('SELECT time_logged FROM cards WHERE id = ?').get(cardId);
+  if (!card) return null;
+  const newTotal = (card.time_logged || 0) + minutes;
+  db.prepare('UPDATE cards SET time_logged = ? WHERE id = ?').run(newTotal, cardId);
+  return db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
+}
+
+// --- Card Dependencies ---
+
+function getCardDependencies(cardId) {
+  const blocking = db.prepare(`
+    SELECT c.id, c.text, c.column_id, col.title as column_title
+    FROM card_dependencies cd
+    JOIN cards c ON c.id = cd.blocking_card_id
+    JOIN columns col ON col.id = c.column_id
+    WHERE cd.blocked_card_id = ?
+  `).all(cardId);
+  const blocked = db.prepare(`
+    SELECT c.id, c.text, c.column_id, col.title as column_title
+    FROM card_dependencies cd
+    JOIN cards c ON c.id = cd.blocked_card_id
+    JOIN columns col ON col.id = c.column_id
+    WHERE cd.blocking_card_id = ?
+  `).all(cardId);
+  return { blocking, blocked };
+}
+
+function addCardDependency(blockingCardId, blockedCardId) {
+  if (blockingCardId === blockedCardId) throw new Error('Card cannot depend on itself');
+  db.prepare('INSERT OR IGNORE INTO card_dependencies (blocking_card_id, blocked_card_id) VALUES (?, ?)').run(blockingCardId, blockedCardId);
+}
+
+function removeCardDependency(blockingCardId, blockedCardId) {
+  db.prepare('DELETE FROM card_dependencies WHERE blocking_card_id = ? AND blocked_card_id = ?').run(blockingCardId, blockedCardId);
+}
+
+function getBlockedCardIds(boardId) {
+  return db.prepare(`
+    SELECT DISTINCT cd.blocked_card_id as id
+    FROM card_dependencies cd
+    JOIN cards c ON c.id = cd.blocked_card_id
+    JOIN columns col ON col.id = c.column_id
+    WHERE col.board_id = ?
+  `).all(boardId).map(r => r.id);
+}
+
 // --- Raw DB access ---
 
 function getDb() { return db; }
@@ -1277,7 +1340,7 @@ module.exports = {
   createColumn, updateColumn, deleteColumn, moveColumn,
   getColumnBoardId, getCardBoardId,
   // Cards
-  createCard, updateCard, deleteCard, moveCard, duplicateCard,
+  createCard, updateCard, deleteCard, moveCard, duplicateCard, logTime,
   // Checklist
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   // Attachments

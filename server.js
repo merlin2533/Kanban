@@ -694,12 +694,28 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
     const validRec = [null, 'daily', 'weekly', 'monthly'];
     updates.recurrence = validRec.includes(req.body.recurrence) ? req.body.recurrence : null;
   }
+  if (req.body.time_estimate !== undefined) {
+    const te = req.body.time_estimate === null ? null : parseInt(req.body.time_estimate);
+    if (te === null || (!isNaN(te) && te >= 0)) updates.time_estimate = te;
+  }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
   const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated', cardId: id, user });
+  res.json(card);
+});
+
+app.post('/api/cards/:cardId/log-time', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const minutes = parseInt(req.body.minutes);
+  if (isNaN(minutes) || minutes < 1 || minutes > 1440) return res.status(400).json({ error: 'minutes must be 1-1440' });
+  const card = db.logTime(id, minutes);
+  if (!card) return res.status(404).json({ error: 'Card not found' });
+  const col = db.getDb().prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+  if (col) broadcast(col.board_id, { type: 'update', action: 'time_logged', cardId: id });
   res.json(card);
 });
 
