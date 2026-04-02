@@ -2051,3 +2051,9 @@ main#board {
   .desc-preview-btn { border-color: #475569; color: #94a3b8; }
   .desc-preview-btn:hover { background: #334155; }
 }
+
+/* --- Card Dependencies --- */
+.card-blocked-badge { font-size: 13px; cursor: help; }
+.dep-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+.dep-card-text { flex: 1; color: #334155; }
+.dep-column { font-size: 11px; color: #94a3b8; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
