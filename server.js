@@ -136,6 +136,11 @@ function authMiddleware(req, res, next) {
   return res.status(401).json({ error: 'Authentication required' });
 }
 
+// Permission levels:
+// 'admin'      - Full access (authenticated admin user)
+// 'edit'       - Can edit board structure (columns, labels, settings) and all cards
+// 'cards_only' - Can only create/edit/delete cards; cannot modify board/columns
+// 'view'       - Read-only access
 function requireEdit(req, res, next) {
   if (req.permission === 'admin' || req.permission === 'edit' || req.permission === 'cards_only') return next();
   return res.status(403).json({ error: 'Edit permission required' });
