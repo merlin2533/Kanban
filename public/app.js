@@ -5,8 +5,8 @@ let currentCardId = null;
 const modifiedCards = new Set();
 
 // --- Advanced Filter State ---
-let activePriorityFilter = null; // null | 'high' | 'medium' | 'low'
-let activeDueFilter = null;      // null | 'overdue' | 'today' | 'week' | 'none'
+let activePriorityFilter = localStorage.getItem('kanban_priority_filter') || null;
+let activeDueFilter = localStorage.getItem('kanban_due_filter') || null;
 
 // --- Undo Stack ---
 const undoStack = [];
@@ -461,6 +461,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         filterBtn.classList.remove('filter-active');
       }
     }
+    localStorage.setItem('kanban_priority_filter', activePriorityFilter || '');
+    localStorage.setItem('kanban_due_filter', activeDueFilter || '');
   }
 
   // Advanced filter panel
@@ -539,6 +541,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('clearAllFiltersBtn').onclick = () => {
     activePriorityFilter = null;
     activeDueFilter = null;
+    localStorage.removeItem('kanban_priority_filter');
+    localStorage.removeItem('kanban_due_filter');
     labelFilter.value = '';
     document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
     document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
