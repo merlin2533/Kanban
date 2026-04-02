@@ -137,8 +137,13 @@ function authMiddleware(req, res, next) {
 }
 
 function requireEdit(req, res, next) {
-  if (req.permission === 'admin' || req.permission === 'edit') return next();
+  if (req.permission === 'admin' || req.permission === 'edit' || req.permission === 'cards_only') return next();
   return res.status(403).json({ error: 'Edit permission required' });
+}
+
+function requireBoardEdit(req, res, next) {
+  if (req.permission === 'admin' || req.permission === 'edit') return next();
+  return res.status(403).json({ error: 'Board edit permission required' });
 }
 
 function requireAdmin(req, res, next) {
@@ -342,7 +347,8 @@ app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req,
 });
 
 app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
-  const permission = req.body.permission === 'edit' ? 'edit' : 'view';
+  const validPerms = ['edit', 'cards_only', 'view'];
+  const permission = validPerms.includes(req.body.permission) ? req.body.permission : 'view';
   const label = validString(req.body.label, 200) || '';
   const link = db.createBoardAccessLink(req.params.boardId, permission, label);
   res.status(201).json(link);
@@ -494,7 +500,7 @@ app.get('/api/boards', authMiddleware, (req, res) => {
   }
 });
 
-app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards', authMiddleware, requireBoardEdit, (req, res) => {
   let title = req.body.title;
   if (title !== undefined) {
     title = validString(title, 200);
@@ -515,7 +521,7 @@ app.get('/api/boards/:boardId', authMiddleware, (req, res) => {
   res.json(board);
 });
 
-app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
+app.patch('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
@@ -527,7 +533,7 @@ app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
   res.json(board);
 });
 
-app.delete('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
@@ -552,7 +558,7 @@ app.get('/api/boards/:boardId/export', authMiddleware, (req, res) => {
   res.json(data);
 });
 
-app.post('/api/boards/import', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/import', authMiddleware, requireBoardEdit, (req, res) => {
   if (!req.body || !req.body.title) return res.status(400).json({ error: 'Invalid board data' });
   const board = db.importBoard(req.body);
   res.status(201).json(board);
@@ -566,7 +572,7 @@ app.get('/api/boards/:boardId/archived', authMiddleware, (req, res) => {
 });
 
 // --- Columns ---
-app.post('/api/boards/:boardId/columns', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/:boardId/columns', authMiddleware, requireBoardEdit, (req, res) => {
   const boardId = req.params.boardId;
   if (!boardId) return res.status(400).json({ error: 'Invalid ID' });
   let title = req.body.title;
@@ -582,7 +588,7 @@ app.post('/api/boards/:boardId/columns', authMiddleware, requireEdit, (req, res)
   res.status(201).json(col);
 });
 
-app.patch('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
+app.patch('/api/columns/:columnId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const updates = {};
@@ -603,7 +609,7 @@ app.patch('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
   res.json(col);
 });
 
-app.delete('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/columns/:columnId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const col = db.deleteColumn(id);
@@ -612,7 +618,7 @@ app.delete('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => 
   res.json({ ok: true });
 });
 
-app.put('/api/columns/:columnId/move', authMiddleware, requireEdit, (req, res) => {
+app.put('/api/columns/:columnId/move', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const position = Number(req.body.position);
@@ -883,7 +889,7 @@ app.get('/api/boards/:boardId/card-templates', authMiddleware, (req, res) => {
   res.json(db.getCardTemplates(boardId));
 });
 
-app.post('/api/boards/:boardId/card-templates', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/:boardId/card-templates', authMiddleware, requireBoardEdit, (req, res) => {
   const boardId = req.params.boardId;
   if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
   const name = validString(req.body.name, 200);
@@ -897,7 +903,7 @@ app.post('/api/boards/:boardId/card-templates', authMiddleware, requireEdit, (re
   res.status(201).json(tmpl);
 });
 
-app.delete('/api/card-templates/:id', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/card-templates/:id', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const tmpl = db.deleteCardTemplate(id);
@@ -963,7 +969,7 @@ app.get('/api/boards/:boardId/labels', authMiddleware, (req, res) => {
   res.json(db.getLabels(boardId));
 });
 
-app.post('/api/boards/:boardId/labels', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/:boardId/labels', authMiddleware, requireBoardEdit, (req, res) => {
   const boardId = req.params.boardId;
   const name = validString(req.body.name, 100);
   if (!name) return res.status(400).json({ error: 'name required, max 100 chars' });
@@ -973,7 +979,7 @@ app.post('/api/boards/:boardId/labels', authMiddleware, requireEdit, (req, res) 
   res.status(201).json(label);
 });
 
-app.patch('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
+app.patch('/api/labels/:labelId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.labelId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const label = db.updateLabel(id, req.body);
@@ -982,7 +988,7 @@ app.patch('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
   res.json(label);
 });
 
-app.delete('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/labels/:labelId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.labelId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const label = db.deleteLabel(id);
@@ -1133,7 +1139,7 @@ app.post('/api/boards/:boardId/save-template', authMiddleware, (req, res) => {
   res.status(201).json(t);
 });
 
-app.post('/api/templates/:id/create-board', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/templates/:id/create-board', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const title = validString(req.body.title, 200) || '';

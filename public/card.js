@@ -23,7 +23,7 @@ function getCurrentUsername() {
   return getGuestName();
 }
 function canEdit() {
-  return currentPermission === 'admin' || currentPermission === 'edit';
+  return currentPermission === 'admin' || currentPermission === 'edit' || currentPermission === 'cards_only';
 }
 
 function promptGuestName() {

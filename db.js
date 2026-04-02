@@ -387,8 +387,9 @@ function getBoardPublicAccess(boardId) {
 }
 
 function setBoardPublicAccess(boardId, permission) {
-  // permission: 'view', 'edit', or null to disable
-  const value = permission === 'edit' ? 'edit' : permission === 'view' ? 'view' : null;
+  // permission: 'view', 'edit', 'cards_only', or null to disable
+  const validPerms = ['edit', 'cards_only', 'view'];
+  const value = validPerms.includes(permission) ? permission : null;
   db.prepare('UPDATE boards SET public_access = ? WHERE id = ?').run(value, boardId);
   // Maintain synthetic access link with fixed ID 'pub_<boardId>'
   const syntheticId = 'pub_' + boardId;

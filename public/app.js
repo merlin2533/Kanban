@@ -149,6 +149,10 @@ async function checkAuth() {
 }
 
 function canEdit() {
+  return currentPermission === 'admin' || currentPermission === 'edit' || currentPermission === 'cards_only';
+}
+
+function canEditBoard() {
   return currentPermission === 'admin' || currentPermission === 'edit';
 }
 
@@ -478,7 +482,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   deleteBoard.className = 'icon-btn';
   deleteBoard.innerHTML = '&#128465;'; // trash icon
   deleteBoard.title = 'Board löschen';
-  if (!canEdit()) deleteBoard.style.display = 'none';
+  if (!canEditBoard()) deleteBoard.style.display = 'none';
   deleteBoard.onclick = async () => {
     if (!confirm('Board komplett löschen? Das kann nicht rückgängig gemacht werden!')) return;
     try {
@@ -860,6 +864,7 @@ function renderBoard() {
 
   addColDiv.appendChild(addBtn);
   addColDiv.appendChild(addColInput);
+  if (!canEditBoard()) addColDiv.style.display = 'none';
   boardEl.appendChild(addColDiv);
 }
 
@@ -921,7 +926,7 @@ function createColumnEl(col) {
     }
   };
 
-  if (!canEdit()) {
+  if (!canEditBoard()) {
     titleInput.onclick = null;
     titleInput.readOnly = true;
     titleInput.style.pointerEvents = 'none';
@@ -938,24 +943,26 @@ function createColumnEl(col) {
     header.insertBefore(wipBadge, deleteBtn);
   }
 
-  count.ondblclick = async () => {
-    const limit = prompt('WIP-Limit setzen (0 = kein Limit):', col.wip_limit || '0');
-    if (limit === null) return;
-    const num = parseInt(limit);
-    if (isNaN(num) || num < 0) return;
-    try {
-      await api(`/api/columns/${col.id}`, 'PATCH', { wip_limit: num });
-      loadBoard();
-    } catch (e) { showError(e.message); }
-  };
-  count.title = 'Doppelklick: WIP-Limit setzen';
+  if (canEditBoard()) {
+    count.ondblclick = async () => {
+      const limit = prompt('WIP-Limit setzen (0 = kein Limit):', col.wip_limit || '0');
+      if (limit === null) return;
+      const num = parseInt(limit);
+      if (isNaN(num) || num < 0) return;
+      try {
+        await api(`/api/columns/${col.id}`, 'PATCH', { wip_limit: num });
+        loadBoard();
+      } catch (e) { showError(e.message); }
+    };
+    count.title = 'Doppelklick: WIP-Limit setzen';
+  }
 
   header.appendChild(titleInput);
   header.appendChild(count);
   header.appendChild(deleteBtn);
 
   // Column drag & drop
-  header.draggable = true;
+  header.draggable = canEditBoard();
   header.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData('text/column', col.id.toString());
     e.dataTransfer.effectAllowed = 'move';
@@ -2350,6 +2357,7 @@ async function togglePermissionsPanel() {
           <select id="publicAccessPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
             <option value="">Deaktiviert</option>
             <option value="view">Nur lesen</option>
+            <option value="cards_only">Nur Karten</option>
             <option value="edit">Bearbeiten</option>
           </select>
           <button onclick="savePublicAccess()" style="padding:6px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Speichern</button>
@@ -2361,6 +2369,7 @@ async function togglePermissionsPanel() {
         <div style="display:flex;gap:8px;align-items:center;">
           <select id="newLinkPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
             <option value="view">Nur lesen</option>
+            <option value="cards_only">Nur Karten</option>
             <option value="edit">Bearbeiten</option>
           </select>
           <input type="text" id="newLinkLabel" placeholder="Bezeichnung..." style="flex:1;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
@@ -2395,7 +2404,7 @@ async function togglePermissionsPanel() {
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
               <strong>${esc(link.label) || 'Link'}</strong>
-              <span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${link.permission === 'edit' ? '#dbeafe' : '#f1f5f9'};color:${link.permission === 'edit' ? '#2563eb' : '#64748b'};margin-left:4px;">${link.permission === 'edit' ? 'Bearbeiten' : 'Nur lesen'}</span>
+              <span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${link.permission === 'edit' ? '#dbeafe' : link.permission === 'cards_only' ? '#dcfce7' : '#f1f5f9'};color:${link.permission === 'edit' ? '#2563eb' : link.permission === 'cards_only' ? '#16a34a' : '#64748b'};margin-left:4px;">${link.permission === 'edit' ? 'Bearbeiten' : link.permission === 'cards_only' ? 'Nur Karten' : 'Nur lesen'}</span>
             </div>
             <div style="display:flex;gap:4px;">
               <button class="icon-btn" title="Link kopieren" style="font-size:14px;padding:4px 8px;" data-copy-url>&#128279;</button>
