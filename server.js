@@ -136,9 +136,19 @@ function authMiddleware(req, res, next) {
   return res.status(401).json({ error: 'Authentication required' });
 }
 
+// Permission levels:
+// 'admin'      - Full access (authenticated admin user)
+// 'edit'       - Can edit board structure (columns, labels, settings) and all cards
+// 'cards_only' - Can only create/edit/delete cards; cannot modify board/columns
+// 'view'       - Read-only access
 function requireEdit(req, res, next) {
-  if (req.permission === 'admin' || req.permission === 'edit') return next();
+  if (req.permission === 'admin' || req.permission === 'edit' || req.permission === 'cards_only') return next();
   return res.status(403).json({ error: 'Edit permission required' });
+}
+
+function requireBoardEdit(req, res, next) {
+  if (req.permission === 'admin' || req.permission === 'edit') return next();
+  return res.status(403).json({ error: 'Board edit permission required' });
 }
 
 function requireAdmin(req, res, next) {
@@ -289,6 +299,28 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   res.json({ ok: true });
 });
 
+// --- Notification Preferences ---
+app.get('/api/me/notification-prefs', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  res.json(db.getNotificationPrefs(req.user.id));
+});
+
+app.put('/api/me/notification-prefs', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const { event_type, email_enabled } = req.body;
+  try {
+    db.setNotificationPref(req.user.id, event_type, !!email_enabled);
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/me/notification-event-types', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  res.json(db.NOTIFICATION_EVENT_TYPES);
+});
+
 // --- Admin ---
 app.get('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   res.json(db.getUsers());
@@ -342,7 +374,9 @@ app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req,
 });
 
 app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
-  const permission = req.body.permission === 'edit' ? 'edit' : 'view';
+  const validPerms = ['edit', 'cards_only', 'view'];
+  if (!validPerms.includes(req.body.permission)) return res.status(400).json({ error: 'Invalid permission value' });
+  const permission = req.body.permission;
   const label = validString(req.body.label, 200) || '';
   const link = db.createBoardAccessLink(req.params.boardId, permission, label);
   res.status(201).json(link);
@@ -391,7 +425,9 @@ function triggerWebhooks(boardId, event) {
       req.on('error', () => {});
       req.write(payload);
       req.end();
-    } catch {}
+    } catch (e) {
+      console.error('[WEBHOOK] Failed to deliver webhook to', wh.url, e);
+    }
   }
 }
 
@@ -494,7 +530,7 @@ app.get('/api/boards', authMiddleware, (req, res) => {
   }
 });
 
-app.post('/api/boards', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards', authMiddleware, requireBoardEdit, (req, res) => {
   let title = req.body.title;
   if (title !== undefined) {
     title = validString(title, 200);
@@ -515,7 +551,7 @@ app.get('/api/boards/:boardId', authMiddleware, (req, res) => {
   res.json(board);
 });
 
-app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
+app.patch('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
@@ -527,7 +563,7 @@ app.patch('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
   res.json(board);
 });
 
-app.delete('/api/boards/:boardId', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
@@ -552,7 +588,7 @@ app.get('/api/boards/:boardId/export', authMiddleware, (req, res) => {
   res.json(data);
 });
 
-app.post('/api/boards/import', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/import', authMiddleware, requireBoardEdit, (req, res) => {
   if (!req.body || !req.body.title) return res.status(400).json({ error: 'Invalid board data' });
   const board = db.importBoard(req.body);
   res.status(201).json(board);
@@ -566,7 +602,7 @@ app.get('/api/boards/:boardId/archived', authMiddleware, (req, res) => {
 });
 
 // --- Columns ---
-app.post('/api/boards/:boardId/columns', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/:boardId/columns', authMiddleware, requireBoardEdit, (req, res) => {
   const boardId = req.params.boardId;
   if (!boardId) return res.status(400).json({ error: 'Invalid ID' });
   let title = req.body.title;
@@ -582,7 +618,7 @@ app.post('/api/boards/:boardId/columns', authMiddleware, requireEdit, (req, res)
   res.status(201).json(col);
 });
 
-app.patch('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
+app.patch('/api/columns/:columnId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const updates = {};
@@ -603,7 +639,7 @@ app.patch('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
   res.json(col);
 });
 
-app.delete('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/columns/:columnId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const col = db.deleteColumn(id);
@@ -612,7 +648,7 @@ app.delete('/api/columns/:columnId', authMiddleware, requireEdit, (req, res) => 
   res.json({ ok: true });
 });
 
-app.put('/api/columns/:columnId/move', authMiddleware, requireEdit, (req, res) => {
+app.put('/api/columns/:columnId/move', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.columnId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const position = Number(req.body.position);
@@ -680,12 +716,28 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
     const validRec = [null, 'daily', 'weekly', 'monthly'];
     updates.recurrence = validRec.includes(req.body.recurrence) ? req.body.recurrence : null;
   }
+  if (req.body.time_estimate !== undefined) {
+    const te = req.body.time_estimate === null ? null : parseInt(req.body.time_estimate);
+    if (te === null || (!isNaN(te) && te >= 0)) updates.time_estimate = te;
+  }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
   const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated', cardId: id, user });
+  res.json(card);
+});
+
+app.post('/api/cards/:cardId/log-time', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const minutes = parseInt(req.body.minutes);
+  if (isNaN(minutes) || minutes < 1 || minutes > 1440) return res.status(400).json({ error: 'minutes must be 1-1440' });
+  const card = db.logTime(id, minutes);
+  if (!card) return res.status(404).json({ error: 'Card not found' });
+  const col = db.getDb().prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+  if (col) broadcast(col.board_id, { type: 'update', action: 'time_logged', cardId: id });
   res.json(card);
 });
 
@@ -831,7 +883,11 @@ app.delete('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => 
 app.get('/api/cards/:cardId/comments', authMiddleware, (req, res) => {
   const id = validId(req.params.cardId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  res.json(db.getComments(id));
+  const limit = Math.min(parseInt(req.query.limit) || 20, 100);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const comments = db.getComments(id, limit, offset);
+  const total = db.getCardCommentCount(id);
+  res.json({ comments, total, limit, offset });
 });
 
 app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRateLimit(100), (req, res) => {
@@ -883,7 +939,7 @@ app.get('/api/boards/:boardId/card-templates', authMiddleware, (req, res) => {
   res.json(db.getCardTemplates(boardId));
 });
 
-app.post('/api/boards/:boardId/card-templates', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/:boardId/card-templates', authMiddleware, requireBoardEdit, (req, res) => {
   const boardId = req.params.boardId;
   if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
   const name = validString(req.body.name, 200);
@@ -897,7 +953,7 @@ app.post('/api/boards/:boardId/card-templates', authMiddleware, requireEdit, (re
   res.status(201).json(tmpl);
 });
 
-app.delete('/api/card-templates/:id', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/card-templates/:id', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const tmpl = db.deleteCardTemplate(id);
@@ -963,7 +1019,7 @@ app.get('/api/boards/:boardId/labels', authMiddleware, (req, res) => {
   res.json(db.getLabels(boardId));
 });
 
-app.post('/api/boards/:boardId/labels', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/boards/:boardId/labels', authMiddleware, requireBoardEdit, (req, res) => {
   const boardId = req.params.boardId;
   const name = validString(req.body.name, 100);
   if (!name) return res.status(400).json({ error: 'name required, max 100 chars' });
@@ -973,7 +1029,7 @@ app.post('/api/boards/:boardId/labels', authMiddleware, requireEdit, (req, res) 
   res.status(201).json(label);
 });
 
-app.patch('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
+app.patch('/api/labels/:labelId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.labelId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const label = db.updateLabel(id, req.body);
@@ -982,7 +1038,7 @@ app.patch('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
   res.json(label);
 });
 
-app.delete('/api/labels/:labelId', authMiddleware, requireEdit, (req, res) => {
+app.delete('/api/labels/:labelId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.labelId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const label = db.deleteLabel(id);
@@ -1068,6 +1124,44 @@ app.delete('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, 
   res.json({ ok: true });
 });
 
+// --- Card Dependencies ---
+app.get('/api/cards/:cardId/dependencies', authMiddleware, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  res.json(db.getCardDependencies(id));
+});
+
+app.post('/api/cards/:cardId/dependencies', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  const blockingId = validId(req.body.blocking_card_id);
+  if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
+  try {
+    db.addCardDependency(blockingId, id);
+    // get board for broadcast
+    const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+    if (card) {
+      const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+      if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_added' });
+    }
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.delete('/api/cards/:cardId/dependencies/:blockingId', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  const blockingId = validId(req.params.blockingId);
+  if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
+  db.removeCardDependency(blockingId, id);
+  const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+  if (card) {
+    const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+    if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_removed' });
+  }
+  res.json({ ok: true });
+});
+
 // --- Webhooks ---
 app.get('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
   if (!req.user?.is_admin) return res.status(403).json({ error: 'Admin required' });
@@ -1133,7 +1227,7 @@ app.post('/api/boards/:boardId/save-template', authMiddleware, (req, res) => {
   res.status(201).json(t);
 });
 
-app.post('/api/templates/:id/create-board', authMiddleware, requireEdit, (req, res) => {
+app.post('/api/templates/:id/create-board', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const title = validString(req.body.title, 200) || '';
@@ -1164,10 +1258,10 @@ app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
-  const rawLimit = Number(req.query.limit) || 50;
-  const limit = Math.min(rawLimit, 200);
-  const offset = Math.max(0, Number(req.query.offset) || 0);
-  res.json(db.getActivity(id, limit, offset));
+  const limit = Math.min(parseInt(req.query.limit) || 30, 100);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const { items, total } = db.getActivity(id, limit, offset);
+  res.json({ items, total, limit, offset });
 });
 
 // --- Admin: App Settings ---
@@ -1244,6 +1338,10 @@ app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   const status = err.status || 500;
   res.status(status).json({ error: err.message || 'Internal server error' });
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason, 'Promise:', promise);
 });
 
 // --- Start ---

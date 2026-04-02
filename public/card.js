@@ -23,7 +23,7 @@ function getCurrentUsername() {
   return getGuestName();
 }
 function canEdit() {
-  return currentPermission === 'admin' || currentPermission === 'edit';
+  return currentPermission === 'admin' || currentPermission === 'edit' || currentPermission === 'cards_only';
 }
 
 function promptGuestName() {
@@ -258,6 +258,15 @@ function renderCardPage() {
   // Due date
   document.getElementById('cardDueDate').value = card.due_date || '';
 
+  // Time tracking
+  const timeEstimateEl = document.getElementById('timeEstimate');
+  const timeLoggedDisplayEl = document.getElementById('timeLoggedDisplay');
+  if (timeEstimateEl) timeEstimateEl.value = card.time_estimate != null ? card.time_estimate : '';
+  if (timeLoggedDisplayEl) {
+    const logged = card.time_logged || 0;
+    timeLoggedDisplayEl.textContent = logged > 0 ? `${logged} Min (${Math.floor(logged/60)}h ${logged%60}m)` : '–';
+  }
+
   // Priority
   document.querySelectorAll('.priority-btn').forEach(btn => {
     btn.classList.toggle('active', btn.dataset.priority === (card.priority || ''));
@@ -275,9 +284,11 @@ function renderCardPage() {
 
   renderAssignees(card.assignees || []);
   renderCardLabels(card.labels || []);
+  loadDependencies();
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
-  renderComments(card.comments || []);
+  // Initial comment load with pagination
+  loadComments(false).catch(e => showError(e.message));
   renderRecurrence();
 
   // Move: populate column select
@@ -331,6 +342,10 @@ function renderCardPage() {
     document.getElementById('uploadArea').style.display = 'none';
     document.getElementById('addLabelBtn').style.display = 'none';
     document.getElementById('assigneesSection').style.display = 'none';
+    const timeLogRow = document.getElementById('timeLogRow');
+    if (timeLogRow) timeLogRow.style.display = 'none';
+    const timeEstimateEl2 = document.getElementById('timeEstimate');
+    if (timeEstimateEl2) timeEstimateEl2.disabled = true;
   }
 
   // User badge in header
@@ -356,11 +371,164 @@ function renderCardPage() {
   }
 }
 
-// --- Render comments (newest first) ---
+// --- Comments pagination state ---
+let commentOffset = 0;
+const COMMENT_PAGE_SIZE = 20;
+let commentLoading = false;
+
+// --- Render a single comment ---
+function renderComment(comment) {
+  const item = document.createElement('div');
+  item.className = 'comment-item';
+
+  if (comment.author) {
+    const authorDiv = document.createElement('div');
+    authorDiv.className = 'comment-author';
+    const dot = document.createElement('span');
+    dot.className = 'comment-author-dot';
+    dot.textContent = comment.author.charAt(0).toUpperCase();
+    dot.style.background = stringToColor(comment.author);
+    authorDiv.appendChild(dot);
+    const name = document.createElement('span');
+    name.className = 'comment-author-name';
+    name.textContent = comment.author;
+    authorDiv.appendChild(name);
+    item.appendChild(authorDiv);
+  }
+
+  const text = document.createElement('div');
+  text.className = 'comment-text';
+  text.innerHTML = renderMarkdown(comment.text);
+
+  const footer = document.createElement('div');
+  footer.className = 'comment-footer';
+  const time = document.createElement('span');
+  time.className = 'comment-time';
+  time.textContent = formatTime(comment.created_at);
+  const actions = document.createElement('span');
+  actions.className = 'comment-actions';
+
+  if (canEdit()) {
+    const edit = document.createElement('button');
+    edit.className = 'comment-edit';
+    edit.innerHTML = '&#9998;';
+    edit.title = 'Bearbeiten';
+    edit.onclick = () => {
+      const editArea = document.createElement('textarea');
+      editArea.className = 'comment-edit-area';
+      editArea.value = comment.text;
+      editArea.rows = 3;
+      text.replaceWith(editArea);
+      editArea.addEventListener('paste', (e) => handleImagePaste(e, editArea));
+      editArea.focus();
+      const saveRow = document.createElement('div');
+      saveRow.className = 'comment-edit-actions';
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Speichern';
+      saveBtn.className = 'comment-save-btn';
+      saveBtn.onclick = async () => {
+        const newText = editArea.value.trim();
+        if (!newText) return;
+        try {
+          await api(`/api/comments/${comment.id}`, 'PATCH', { text: newText });
+          reloadComments();
+        } catch (e) { showError(e.message); }
+      };
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Abbrechen';
+      cancelBtn.className = 'comment-cancel-btn';
+      cancelBtn.onclick = () => reloadComments();
+      saveRow.appendChild(saveBtn);
+      saveRow.appendChild(cancelBtn);
+      editArea.insertAdjacentElement('afterend', saveRow);
+    };
+    actions.appendChild(edit);
+  }
+
+  const del = document.createElement('button');
+  del.className = 'comment-delete';
+  del.innerHTML = '&times;';
+  del.title = 'Löschen';
+  del.onclick = async () => {
+    try {
+      await api(`/api/comments/${comment.id}`, 'DELETE');
+      reloadComments();
+    } catch (e) { showError(e.message); }
+  };
+  actions.appendChild(del);
+
+  footer.appendChild(time);
+  footer.appendChild(actions);
+  item.appendChild(text);
+  item.appendChild(footer);
+  return item;
+}
+
+// --- Load comments with pagination ---
+async function loadComments(append = false) {
+  if (commentLoading) return;
+  commentLoading = true;
+  if (!append) commentOffset = 0;
+  try {
+  const data = await api(`/api/cards/${cardId}/comments?limit=${COMMENT_PAGE_SIZE}&offset=${commentOffset}`);
+
+  // Handle both old format (array) and new format (object with .comments)
+  const comments = Array.isArray(data) ? data : data.comments;
+  const total = Array.isArray(data) ? comments.length : data.total;
+
+  const container = document.getElementById('commentsList');
+  if (!container) return;
+
+  if (!append) {
+    container.innerHTML = '';
+    // Remove any existing load-more button
+    const existing = document.getElementById('loadMoreCommentsBtn');
+    if (existing) existing.remove();
+  }
+
+  if (!append && comments.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'comments-empty';
+    empty.textContent = 'Noch keine Kommentare.';
+    container.appendChild(empty);
+    commentOffset = 0;
+    return;
+  }
+
+  for (const comment of comments) {
+    container.appendChild(renderComment(comment));
+  }
+
+  commentOffset += comments.length;
+
+  // Show/hide load more button
+  let loadMoreBtn = document.getElementById('loadMoreCommentsBtn');
+  const hasMore = commentOffset < total;
+
+  if (hasMore) {
+    if (!loadMoreBtn) {
+      loadMoreBtn = document.createElement('button');
+      loadMoreBtn.id = 'loadMoreCommentsBtn';
+      loadMoreBtn.className = 'btn-secondary';
+      loadMoreBtn.style.cssText = 'width:100%;margin-top:8px;';
+      loadMoreBtn.textContent = 'Ältere Kommentare laden';
+      loadMoreBtn.onclick = () => loadComments(true);
+      container.after(loadMoreBtn);
+    }
+  } else if (loadMoreBtn) {
+    loadMoreBtn.remove();
+  }
+  } catch (e) { showError(e.message); } finally { commentLoading = false; }
+}
+
+// --- Render comments (kept for initial load from card data) ---
 function renderComments(comments) {
   const container = document.getElementById('commentsList');
   if (!container) return;
   container.innerHTML = '';
+  // Remove stale load-more button
+  const existing = document.getElementById('loadMoreCommentsBtn');
+  if (existing) existing.remove();
 
   if (comments.length === 0) {
     const empty = document.createElement('p');
@@ -370,92 +538,8 @@ function renderComments(comments) {
     return;
   }
 
-  // API already returns newest first (ORDER BY created_at DESC)
   for (const comment of comments) {
-    const item = document.createElement('div');
-    item.className = 'comment-item';
-
-    if (comment.author) {
-      const authorDiv = document.createElement('div');
-      authorDiv.className = 'comment-author';
-      const dot = document.createElement('span');
-      dot.className = 'comment-author-dot';
-      dot.textContent = comment.author.charAt(0).toUpperCase();
-      dot.style.background = stringToColor(comment.author);
-      authorDiv.appendChild(dot);
-      const name = document.createElement('span');
-      name.className = 'comment-author-name';
-      name.textContent = comment.author;
-      authorDiv.appendChild(name);
-      item.appendChild(authorDiv);
-    }
-
-    const text = document.createElement('div');
-    text.className = 'comment-text';
-    text.innerHTML = renderMarkdown(comment.text);
-
-    const footer = document.createElement('div');
-    footer.className = 'comment-footer';
-    const time = document.createElement('span');
-    time.className = 'comment-time';
-    time.textContent = formatTime(comment.created_at);
-    const actions = document.createElement('span');
-    actions.className = 'comment-actions';
-
-    if (canEdit()) {
-      const edit = document.createElement('button');
-      edit.className = 'comment-edit';
-      edit.innerHTML = '&#9998;';
-      edit.title = 'Bearbeiten';
-      edit.onclick = () => {
-        const editArea = document.createElement('textarea');
-        editArea.className = 'comment-edit-area';
-        editArea.value = comment.text;
-        editArea.rows = 3;
-        text.replaceWith(editArea);
-        editArea.addEventListener('paste', (e) => handleImagePaste(e, editArea));
-        editArea.focus();
-        const saveRow = document.createElement('div');
-        saveRow.className = 'comment-edit-actions';
-        const saveBtn = document.createElement('button');
-        saveBtn.textContent = 'Speichern';
-        saveBtn.className = 'comment-save-btn';
-        saveBtn.onclick = async () => {
-          const newText = editArea.value.trim();
-          if (!newText) return;
-          try {
-            await api(`/api/comments/${comment.id}`, 'PATCH', { text: newText });
-            reloadComments();
-          } catch (e) { showError(e.message); }
-        };
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = 'Abbrechen';
-        cancelBtn.className = 'comment-cancel-btn';
-        cancelBtn.onclick = () => reloadComments();
-        saveRow.appendChild(saveBtn);
-        saveRow.appendChild(cancelBtn);
-        editArea.insertAdjacentElement('afterend', saveRow);
-      };
-      actions.appendChild(edit);
-    }
-
-    const del = document.createElement('button');
-    del.className = 'comment-delete';
-    del.innerHTML = '&times;';
-    del.title = 'Löschen';
-    del.onclick = async () => {
-      try {
-        await api(`/api/comments/${comment.id}`, 'DELETE');
-        reloadComments();
-      } catch (e) { showError(e.message); }
-    };
-    actions.appendChild(del);
-
-    footer.appendChild(time);
-    footer.appendChild(actions);
-    item.appendChild(text);
-    item.appendChild(footer);
-    container.appendChild(item);
+    container.appendChild(renderComment(comment));
   }
 }
 
@@ -475,8 +559,7 @@ async function addComment() {
 
 async function reloadComments() {
   try {
-    const comments = await api(`/api/cards/${cardId}/comments`);
-    renderComments(comments);
+    await loadComments(false);
   } catch (e) { showError(e.message); }
 }
 
@@ -511,6 +594,77 @@ function renderAssignees(assignees) {
       tag.appendChild(rm);
     }
     container.appendChild(tag);
+  }
+}
+
+// --- Card Dependencies ---
+async function loadDependencies() {
+  const deps = await api(`/api/cards/${cardId}/dependencies`);
+  renderDependencies(deps);
+}
+
+function renderDependencies(deps) {
+  if (!deps) deps = { blocking: [], blocked: [] };
+  let section = document.getElementById('dependenciesSection');
+  if (!section) {
+    section = document.createElement('div');
+    section.id = 'dependenciesSection';
+    section.className = 'card-section';
+    const assigneesSection = document.getElementById('assigneesSection') || document.querySelector('.assignees-section');
+    if (assigneesSection) assigneesSection.after(section);
+    else document.querySelector('.card-detail')?.appendChild(section);
+  }
+
+  section.innerHTML = `<div class="card-field-label">Abhängigkeiten</div>`;
+
+  if (deps.blocking.length === 0 && !canEdit()) {
+    const empty = document.createElement('p');
+    empty.style.cssText = 'color:#94a3b8;font-size:13px;margin:4px 0;';
+    empty.textContent = 'Keine Abhängigkeiten';
+    section.appendChild(empty);
+    return;
+  }
+
+  if (deps.blocking.length > 0) {
+    const blockingDiv = document.createElement('div');
+    blockingDiv.innerHTML = '<div style="font-size:12px;color:#64748b;margin:4px 0;">Blockiert von:</div>';
+    for (const dep of deps.blocking) {
+      const item = document.createElement('div');
+      item.className = 'dep-item';
+      item.innerHTML = `<span class="dep-card-text">${esc(dep.text)}</span><span class="dep-column">${esc(dep.column_title)}</span>`;
+      if (canEdit()) {
+        const rm = document.createElement('button');
+        rm.className = 'remove-label';
+        rm.textContent = '×';
+        rm.onclick = async () => {
+          await api(`/api/cards/${cardId}/dependencies/${dep.id}`, 'DELETE');
+          loadDependencies();
+        };
+        item.appendChild(rm);
+      }
+      blockingDiv.appendChild(item);
+    }
+    section.appendChild(blockingDiv);
+  }
+
+  if (canEdit()) {
+    const addDiv = document.createElement('div');
+    addDiv.style.cssText = 'margin-top:8px;';
+    addDiv.innerHTML = `
+      <input type="number" id="depCardIdInput" placeholder="Karten-ID eingeben..." style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;width:160px;">
+      <button id="addDepBtn" class="btn-secondary" style="margin-left:4px;">+ Blockiert von</button>
+    `;
+    section.appendChild(addDiv);
+    document.getElementById('addDepBtn').onclick = async () => {
+      const blockingId = parseInt(document.getElementById('depCardIdInput').value);
+      if (isNaN(blockingId) || blockingId <= 0) return;
+      if (blockingId === cardId) { showError('Karte kann nicht von sich selbst blockiert werden'); return; }
+      try {
+        await api(`/api/cards/${cardId}/dependencies`, 'POST', { blocking_card_id: blockingId });
+        document.getElementById('depCardIdInput').value = '';
+        loadDependencies();
+      } catch (e) { showError(e.message); }
+    };
   }
 }
 
@@ -1092,6 +1246,32 @@ function setupEvents() {
       card.recurrence = e.target.value || null;
     } catch (err) { showError(err.message); }
   };
+
+  // Time estimate save on change
+  const timeEstimateEl = document.getElementById('timeEstimate');
+  if (timeEstimateEl) {
+    timeEstimateEl.onchange = async () => {
+      const val = timeEstimateEl.value === '' ? null : parseInt(timeEstimateEl.value);
+      try { await api(`/api/cards/${cardId}`, 'PATCH', { time_estimate: val }); } catch (e) { showError(e.message); }
+    };
+  }
+
+  // Time log button
+  const timeLogBtn = document.getElementById('timeLogBtn');
+  if (timeLogBtn) {
+    timeLogBtn.onclick = async () => {
+      const mins = parseInt(document.getElementById('timeLogInput').value);
+      if (!mins || mins < 1) return;
+      try {
+        const updated = await api(`/api/cards/${cardId}/log-time`, 'POST', { minutes: mins });
+        const timeLoggedDisplayEl = document.getElementById('timeLoggedDisplay');
+        const logged = updated.time_logged || 0;
+        if (timeLoggedDisplayEl) timeLoggedDisplayEl.textContent = `${logged} Min (${Math.floor(logged/60)}h ${logged%60}m)`;
+      } catch (e) { showError(e.message); } finally {
+        document.getElementById('timeLogInput').value = '';
+      }
+    };
+  }
 
   // Close label dropdown on outside click
   document.addEventListener('click', (e) => {

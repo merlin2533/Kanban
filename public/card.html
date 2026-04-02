@@ -79,6 +79,28 @@
           <input type="date" id="cardDueDate" class="sidebar-input" aria-label="Fälligkeitsdatum">
         </section>
 
+        <!-- Time Tracking -->
+        <section class="sidebar-section" id="timeTrackingSection">
+          <h3 class="sidebar-section-label">Zeiterfassung</h3>
+          <div class="time-tracking-row">
+            <div class="time-field">
+              <label for="timeEstimate">Schätzung (Min)</label>
+              <input type="number" id="timeEstimate" class="sidebar-input" min="0" max="99999" placeholder="–" aria-label="Zeitschätzung in Minuten">
+            </div>
+            <div class="time-field">
+              <label>Geloggt</label>
+              <span id="timeLoggedDisplay" class="time-logged-display">–</span>
+            </div>
+          </div>
+          <div class="time-log-row" id="timeLogRow">
+            <label for="timeLogInput">Zeit buchen (Min)</label>
+            <div style="display:flex;gap:4px;margin-top:4px;">
+              <input type="number" id="timeLogInput" class="sidebar-input" min="1" max="1440" placeholder="z.B. 30" aria-label="Zeit buchen in Minuten" style="flex:1;">
+              <button id="timeLogBtn" class="btn-secondary" style="white-space:nowrap">Buchen</button>
+            </div>
+          </div>
+        </section>
+
         <!-- Recurrence -->
         <section class="sidebar-section">
           <h3 class="sidebar-section-label">Wiederholung</h3>

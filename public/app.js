@@ -4,6 +4,10 @@ let board = null;
 let currentCardId = null;
 const modifiedCards = new Set();
 
+// --- Advanced Filter State ---
+let activePriorityFilter = localStorage.getItem('kanban_priority_filter_' + boardId) || null;
+let activeDueFilter = localStorage.getItem('kanban_due_filter_' + boardId) || null;
+
 // --- Undo Stack ---
 const undoStack = [];
 const MAX_UNDO = 20;
@@ -149,6 +153,10 @@ async function checkAuth() {
 }
 
 function canEdit() {
+  return currentPermission === 'admin' || currentPermission === 'edit' || currentPermission === 'cards_only';
+}
+
+function canEditBoard() {
   return currentPermission === 'admin' || currentPermission === 'edit';
 }
 
@@ -344,8 +352,12 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   function hideSearchResults() {
     if (searchResultsContainer) searchResultsContainer.classList.add('hidden');
-    // Also restore all cards visibility
-    document.querySelectorAll('.card').forEach(c => c.style.display = '');
+    // Restore card visibility respecting active filters
+    if (window._filterCards) {
+      window._filterCards();
+    } else {
+      document.querySelectorAll('.card').forEach(c => c.style.display = '');
+    }
   }
 
   searchInput.oninput = () => {
@@ -389,18 +401,156 @@ document.addEventListener('DOMContentLoaded', async () => {
   labelFilter.innerHTML = '<option value="">Alle Labels</option>';
   document.querySelector('header').insertBefore(labelFilter, document.querySelector('.header-actions'));
 
-  labelFilter.onchange = () => {
+  labelFilter.onchange = () => filterCards();
+
+  // filterCards: applies label, priority, and due date filters simultaneously
+  function filterCards() {
     const selectedLabel = labelFilter.value;
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const weekEnd = new Date(today);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+
     document.querySelectorAll('.card').forEach(card => {
-      if (!selectedLabel) {
-        card.style.display = '';
-        return;
+      // Label filter
+      if (selectedLabel) {
+        const dots = card.querySelectorAll('.card-label-dot');
+        if (![...dots].some(dot => dot.title === selectedLabel)) {
+          card.style.display = 'none';
+          return;
+        }
       }
-      const dots = card.querySelectorAll('.card-label-dot');
-      const hasLabel = [...dots].some(dot => dot.title === selectedLabel);
-      card.style.display = hasLabel ? '' : 'none';
+
+      // Priority filter
+      if (activePriorityFilter) {
+        if (card.dataset.priority !== activePriorityFilter) {
+          card.style.display = 'none';
+          return;
+        }
+      }
+
+      // Due date filter
+      if (activeDueFilter) {
+        const dueDateStr = card.dataset.dueDate;
+        if (activeDueFilter === 'none') {
+          if (dueDateStr) { card.style.display = 'none'; return; }
+        } else {
+          if (!dueDateStr) { card.style.display = 'none'; return; }
+          const due = new Date(dueDateStr);
+          due.setHours(0, 0, 0, 0);
+          if (activeDueFilter === 'overdue') {
+            if (due >= today) { card.style.display = 'none'; return; }
+          } else if (activeDueFilter === 'today') {
+            if (due.getTime() !== today.getTime()) { card.style.display = 'none'; return; }
+          } else if (activeDueFilter === 'week') {
+            if (due < today || due >= weekEnd) { card.style.display = 'none'; return; }
+          }
+        }
+      }
+
+      card.style.display = '';
     });
+
+    // Update filter button indicator
+    const hasActiveFilter = selectedLabel || activePriorityFilter || activeDueFilter;
+    const filterBtn = document.getElementById('advFilterBtn');
+    if (filterBtn) {
+      if (hasActiveFilter) {
+        filterBtn.classList.add('filter-active');
+      } else {
+        filterBtn.classList.remove('filter-active');
+      }
+    }
+    localStorage.setItem('kanban_priority_filter_' + boardId, activePriorityFilter || '');
+    localStorage.setItem('kanban_due_filter_' + boardId, activeDueFilter || '');
+  }
+
+  // Advanced filter panel
+  const advFilterBtn = document.createElement('button');
+  advFilterBtn.className = 'icon-btn';
+  advFilterBtn.id = 'advFilterBtn';
+  advFilterBtn.innerHTML = '&#9878;'; // filter funnel symbol
+  advFilterBtn.title = 'Erweiterte Filter';
+  document.querySelector('header').insertBefore(advFilterBtn, document.querySelector('.header-actions'));
+
+  const advFilterPanel = document.createElement('div');
+  advFilterPanel.className = 'adv-filter-panel hidden';
+  advFilterPanel.id = 'advFilterPanel';
+  advFilterPanel.innerHTML = `
+    <div class="adv-filter-section">
+      <div class="adv-filter-label">Priorität</div>
+      <div class="adv-filter-btns" id="priorityFilterBtns">
+        <button class="adv-filter-btn active" data-value="">Alle</button>
+        <button class="adv-filter-btn priority-high" data-value="high">Hoch</button>
+        <button class="adv-filter-btn priority-medium" data-value="medium">Mittel</button>
+        <button class="adv-filter-btn priority-low" data-value="low">Niedrig</button>
+      </div>
+    </div>
+    <div class="adv-filter-section">
+      <div class="adv-filter-label">Fälligkeit</div>
+      <div class="adv-filter-btns" id="dueFilterBtns">
+        <button class="adv-filter-btn active" data-value="">Alle</button>
+        <button class="adv-filter-btn" data-value="overdue">Überfällig</button>
+        <button class="adv-filter-btn" data-value="today">Heute</button>
+        <button class="adv-filter-btn" data-value="week">Diese Woche</button>
+        <button class="adv-filter-btn" data-value="none">Ohne Datum</button>
+      </div>
+    </div>
+    <div class="adv-filter-section">
+      <button class="adv-filter-clear" id="clearAllFiltersBtn">Alle Filter zurücksetzen</button>
+    </div>
+  `;
+  // Append to body so header overflow:hidden does not clip the panel
+  document.body.appendChild(advFilterPanel);
+
+  function positionFilterPanel() {
+    const rect = advFilterBtn.getBoundingClientRect();
+    advFilterPanel.style.top = (rect.bottom + window.scrollY + 6) + 'px';
+    advFilterPanel.style.left = Math.max(8, rect.right - 260 + window.scrollX) + 'px';
+  }
+
+  advFilterBtn.onclick = (e) => {
+    e.stopPropagation();
+    const isHidden = advFilterPanel.classList.contains('hidden');
+    advFilterPanel.classList.toggle('hidden');
+    if (isHidden) requestAnimationFrame(positionFilterPanel);
   };
+
+  document.addEventListener('click', (e) => {
+    if (!advFilterPanel.contains(e.target) && e.target !== advFilterBtn) {
+      advFilterPanel.classList.add('hidden');
+    }
+  });
+
+  document.getElementById('priorityFilterBtns').onclick = (e) => {
+    const btn = e.target.closest('.adv-filter-btn');
+    if (!btn) return;
+    activePriorityFilter = btn.dataset.value || null;
+    document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    filterCards();
+  };
+
+  document.getElementById('dueFilterBtns').onclick = (e) => {
+    const btn = e.target.closest('.adv-filter-btn');
+    if (!btn) return;
+    activeDueFilter = btn.dataset.value || null;
+    document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b === btn));
+    filterCards();
+  };
+
+  document.getElementById('clearAllFiltersBtn').onclick = () => {
+    activePriorityFilter = null;
+    activeDueFilter = null;
+    localStorage.removeItem('kanban_priority_filter_' + boardId);
+    localStorage.removeItem('kanban_due_filter_' + boardId);
+    labelFilter.value = '';
+    document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
+    document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
+    filterCards();
+  };
+
+  // Expose filterCards for use after board reload
+  window._filterCards = filterCards;
 
   // Export button
   const exportBtn = document.createElement('button');
@@ -478,7 +628,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   deleteBoard.className = 'icon-btn';
   deleteBoard.innerHTML = '&#128465;'; // trash icon
   deleteBoard.title = 'Board löschen';
-  if (!canEdit()) deleteBoard.style.display = 'none';
+  if (!canEditBoard()) deleteBoard.style.display = 'none';
   deleteBoard.onclick = async () => {
     if (!confirm('Board komplett löschen? Das kann nicht rückgängig gemacht werden!')) return;
     try {
@@ -664,6 +814,30 @@ document.addEventListener('DOMContentLoaded', async () => {
       e.preventDefault();
       performUndo();
     }
+    if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.ctrlKey && !e.metaKey) {
+      const focused = document.activeElement;
+      // Only navigate if no input/textarea is focused
+      if (focused && (focused.tagName === 'INPUT' || focused.tagName === 'TEXTAREA' || focused.isContentEditable)) return;
+      const cards = Array.from(document.querySelectorAll('.card:not([style*="display: none"])'));
+      if (cards.length === 0) return;
+      const current = document.querySelector('.card.kb-focused');
+      let idx = current ? cards.indexOf(current) : -1;
+      if (e.key === 'ArrowDown') idx = Math.min(idx + 1, cards.length - 1);
+      else idx = Math.max(idx - 1, 0);
+      if (current) current.classList.remove('kb-focused');
+      cards[idx].classList.add('kb-focused');
+      cards[idx].scrollIntoView({ block: 'nearest' });
+      e.preventDefault();
+    }
+    if (e.key === 'Enter' && !e.ctrlKey && !e.metaKey) {
+      const focused = document.querySelector('.card.kb-focused');
+      if (focused) {
+        const focusedEl = document.activeElement;
+        if (focusedEl && (focusedEl.tagName === 'INPUT' || focusedEl.tagName === 'TEXTAREA')) return;
+        focused.click();
+        e.preventDefault();
+      }
+    }
   });
 });
 
@@ -762,6 +936,8 @@ async function loadBoard() {
       }
       lf.value = currentVal;
     }
+    // Re-apply active filters after board re-renders
+    if (window._filterCards) window._filterCards();
     checkNewActivity();
   } catch (e) {
     showError(e.message);
@@ -860,6 +1036,7 @@ function renderBoard() {
 
   addColDiv.appendChild(addBtn);
   addColDiv.appendChild(addColInput);
+  if (!canEditBoard()) addColDiv.style.display = 'none';
   boardEl.appendChild(addColDiv);
 }
 
@@ -921,7 +1098,26 @@ function createColumnEl(col) {
     }
   };
 
-  if (!canEdit()) {
+  // Collapse toggle button
+  const collapseBtn = document.createElement('button');
+  collapseBtn.className = 'collapse-col-btn';
+  collapseBtn.title = 'Spalte einklappen';
+
+  const isCollapsed = localStorage.getItem('col_collapsed_' + boardId + '_' + col.id) === 'true';
+  if (isCollapsed) {
+    div.classList.add('column-collapsed');
+    collapseBtn.textContent = '▸';
+  } else {
+    collapseBtn.textContent = '▾';
+  }
+
+  collapseBtn.onclick = () => {
+    const collapsed = div.classList.toggle('column-collapsed');
+    localStorage.setItem('col_collapsed_' + boardId + '_' + col.id, collapsed ? 'true' : 'false');
+    collapseBtn.textContent = collapsed ? '▸' : '▾';
+  };
+
+  if (!canEditBoard()) {
     titleInput.onclick = null;
     titleInput.readOnly = true;
     titleInput.style.pointerEvents = 'none';
@@ -938,24 +1134,27 @@ function createColumnEl(col) {
     header.insertBefore(wipBadge, deleteBtn);
   }
 
-  count.ondblclick = async () => {
-    const limit = prompt('WIP-Limit setzen (0 = kein Limit):', col.wip_limit || '0');
-    if (limit === null) return;
-    const num = parseInt(limit);
-    if (isNaN(num) || num < 0) return;
-    try {
-      await api(`/api/columns/${col.id}`, 'PATCH', { wip_limit: num });
-      loadBoard();
-    } catch (e) { showError(e.message); }
-  };
-  count.title = 'Doppelklick: WIP-Limit setzen';
+  if (canEditBoard()) {
+    count.ondblclick = async () => {
+      const limit = prompt('WIP-Limit setzen (0 = kein Limit):', col.wip_limit || '0');
+      if (limit === null) return;
+      const num = parseInt(limit);
+      if (isNaN(num) || num < 0) return;
+      try {
+        await api(`/api/columns/${col.id}`, 'PATCH', { wip_limit: num });
+        loadBoard();
+      } catch (e) { showError(e.message); }
+    };
+    count.title = 'Doppelklick: WIP-Limit setzen';
+  }
 
   header.appendChild(titleInput);
   header.appendChild(count);
+  header.appendChild(collapseBtn);
   header.appendChild(deleteBtn);
 
   // Column drag & drop
-  header.draggable = true;
+  header.draggable = canEditBoard();
   header.addEventListener('dragstart', (e) => {
     e.dataTransfer.setData('text/column', col.id.toString());
     e.dataTransfer.effectAllowed = 'move';
@@ -999,16 +1198,23 @@ function createColumnEl(col) {
   addCard.className = 'add-card';
   const addInput = document.createElement('input');
   addInput.placeholder = '+ Karte hinzufügen...';
+  let addingCard = false;
   addInput.onkeydown = async (e) => {
-    if (e.key === 'Enter' && addInput.value.trim()) {
-      try {
-        const newCard = await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
-        addInput.value = '';
-        const token = window._accessToken ? `?token=${window._accessToken}` : '';
-        window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
-      } catch (e) {
-        showError(e.message);
-      }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const text = addInput.value.trim();
+    if (!text || addingCard) return;
+    addingCard = true;
+    addInput.disabled = true;
+    try {
+      const newCard = await api(`/api/columns/${col.id}/cards`, 'POST', { text });
+      addInput.value = '';
+      const token = window._accessToken ? `?token=${window._accessToken}` : '';
+      window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
+    } catch (err) {
+      showError(err.message);
+      addInput.disabled = false;
+      addingCard = false;
     }
   };
   addCard.appendChild(addInput);
@@ -1062,6 +1268,11 @@ function createCardEl(card) {
   div.dataset.cardId = card.id;
   div.dataset.columnId = card.column_id;
   div.dataset.position = card.position;
+  if (card.priority) div.dataset.priority = card.priority;
+  if (card.due_date) div.dataset.dueDate = card.due_date;
+  if (card.assignees && card.assignees.length > 0) {
+    div.dataset.assignees = card.assignees.map(a => a.username).join(',');
+  }
 
   // Activity highlighting: if card was modified by someone else
   if (modifiedCards.has(card.id)) {
@@ -1098,6 +1309,39 @@ function createCardEl(card) {
   textDiv.className = 'card-text';
   textDiv.textContent = card.text;
   div.appendChild(textDiv);
+
+  // Double-click for inline quick-edit
+  textDiv.ondblclick = (e) => {
+    if (!canEdit()) return;
+    e.stopPropagation(); // prevent card click/navigation
+    const input = document.createElement('input');
+    input.className = 'card-quick-edit-input';
+    input.value = card.text;
+    textDiv.replaceWith(input);
+    input.focus();
+    input.select();
+
+    const save = async () => {
+      const newText = input.value.trim();
+      if (newText && newText !== card.text) {
+        try {
+          await api(`/api/cards/${card.id}`, 'PATCH', { text: newText });
+          card.text = newText;
+        } catch (err) {
+          showError(err.message);
+        }
+      }
+      input.replaceWith(textDiv);
+      textDiv.textContent = card.text;
+    };
+
+    input.onblur = save;
+    input.onkeydown = (ev) => {
+      if (ev.key === 'Enter') { ev.preventDefault(); input.blur(); }
+      if (ev.key === 'Escape') { input.value = card.text; input.blur(); }
+      ev.stopPropagation();
+    };
+  };
 
   // Meta indicators
   const meta = document.createElement('div');
@@ -1163,6 +1407,25 @@ function createCardEl(card) {
     creatorSpan.textContent = card.created_by;
     creatorSpan.title = 'Erstellt von ' + card.created_by;
     meta.appendChild(creatorSpan);
+    hasMeta = true;
+  }
+
+  if (card.time_estimate || card.time_logged) {
+    const timeBadge = document.createElement('span');
+    timeBadge.className = 'card-time-badge';
+    const est = card.time_estimate ? `~${card.time_estimate}m` : '';
+    const logged = card.time_logged ? `\u2713${card.time_logged}m` : '';
+    timeBadge.textContent = [est, logged].filter(Boolean).join(' ');
+    meta.appendChild(timeBadge);
+    hasMeta = true;
+  }
+
+  if (board.blockedCardIds && board.blockedCardIds.includes(card.id)) {
+    const blockedBadge = document.createElement('span');
+    blockedBadge.className = 'card-blocked-badge';
+    blockedBadge.title = 'Blockiert von einer anderen Karte';
+    blockedBadge.textContent = '🔒';
+    meta.appendChild(blockedBadge);
     hasMeta = true;
   }
 
@@ -2003,6 +2266,55 @@ function setupActivityPanel() {
   }
 }
 
+let activityOffset = 0;
+const ACTIVITY_PAGE_SIZE = 30;
+let activityLoading = false;
+
+async function loadActivity(append = false) {
+  if (activityLoading) return;
+  activityLoading = true;
+  if (!append) activityOffset = 0;
+  try {
+  const data = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}&offset=${activityOffset}`);
+
+  // Handle both old array format and new paginated format
+  const items = Array.isArray(data) ? data : (data.items || []);
+  const total = Array.isArray(data) ? items.length : (data.total || items.length);
+
+  const list = document.getElementById('activityList');
+  if (!list) return;
+
+  if (!append) list.innerHTML = '';
+
+  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+
+  if (!append && items.length === 0) {
+    list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
+    activityOffset = 0;
+    return;
+  }
+
+  renderActivityItems(list, items, lastVisit);
+  activityOffset += items.length;
+  const hasMore = activityOffset < total;
+
+  let moreBtn = document.getElementById('activityMoreBtn');
+  if (hasMore) {
+    if (!moreBtn) {
+      moreBtn = document.createElement('button');
+      moreBtn.id = 'activityMoreBtn';
+      moreBtn.className = 'btn-secondary';
+      moreBtn.style.cssText = 'width:100%;margin-top:8px;font-size:13px;';
+      moreBtn.textContent = 'Mehr laden';
+      moreBtn.onclick = () => loadActivity(true);
+      list.after(moreBtn);
+    }
+  } else if (moreBtn) {
+    moreBtn.remove();
+  }
+  } catch (e) { showError(e.message); } finally { activityLoading = false; }
+}
+
 async function toggleActivity() {
   const panel = document.getElementById('activityPanel');
   if (!panel.classList.contains('hidden')) {
@@ -2011,50 +2323,11 @@ async function toggleActivity() {
   }
 
   try {
-    const ACTIVITY_PAGE_SIZE = 50;
-    const activities = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}`);
-    const list = document.getElementById('activityList');
-    list.innerHTML = '';
-
     const lastVisit = localStorage.getItem('lastVisit_' + boardId);
     localStorage.setItem('lastVisit_' + boardId, new Date().toISOString());
     document.getElementById('activityBadge').classList.add('hidden');
 
-    if (activities.length === 0) {
-      list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
-    } else {
-      renderActivityItems(list, activities, lastVisit);
-
-      // Load more button if we got a full page
-      if (activities.length >= ACTIVITY_PAGE_SIZE) {
-        const loadMoreBtn = document.createElement('button');
-        loadMoreBtn.className = 'load-more-btn';
-        loadMoreBtn.textContent = 'Mehr laden...';
-        let offset = ACTIVITY_PAGE_SIZE;
-        loadMoreBtn.onclick = async () => {
-          loadMoreBtn.disabled = true;
-          loadMoreBtn.textContent = '...';
-          try {
-            const more = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}&offset=${offset}`);
-            if (more.length > 0) {
-              renderActivityItems(list, more, lastVisit);
-              offset += more.length;
-            }
-            if (more.length < ACTIVITY_PAGE_SIZE) {
-              loadMoreBtn.remove();
-            } else {
-              loadMoreBtn.disabled = false;
-              loadMoreBtn.textContent = 'Mehr laden...';
-            }
-          } catch (e) {
-            showError(e.message);
-            loadMoreBtn.disabled = false;
-            loadMoreBtn.textContent = 'Mehr laden...';
-          }
-        };
-        list.appendChild(loadMoreBtn);
-      }
-    }
+    await loadActivity(false);
 
     panel.classList.remove('hidden');
   } catch (e) {
@@ -2082,13 +2355,7 @@ function renderActivityItems(list, activities, lastVisit) {
     item.appendChild(actionDiv);
     item.appendChild(timeDiv);
 
-    // Insert before the load-more button if it exists
-    const loadMoreBtn = list.querySelector('.load-more-btn');
-    if (loadMoreBtn) {
-      list.insertBefore(item, loadMoreBtn);
-    } else {
-      list.appendChild(item);
-    }
+    list.appendChild(item);
   }
 }
 
@@ -2097,7 +2364,8 @@ async function checkNewActivity() {
   if (!lastVisit) return;
 
   try {
-    const activities = await api(`/api/boards/${boardId}/activity?limit=50`);
+    const data = await api(`/api/boards/${boardId}/activity?limit=50`);
+    const activities = Array.isArray(data) ? data : (data.items || []);
     const newCount = activities.filter(a => a.created_at > lastVisit).length;
 
     const badge = document.getElementById('activityBadge');
@@ -2350,6 +2618,7 @@ async function togglePermissionsPanel() {
           <select id="publicAccessPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
             <option value="">Deaktiviert</option>
             <option value="view">Nur lesen</option>
+            <option value="cards_only">Nur Karten</option>
             <option value="edit">Bearbeiten</option>
           </select>
           <button onclick="savePublicAccess()" style="padding:6px 12px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;">Speichern</button>
@@ -2361,6 +2630,7 @@ async function togglePermissionsPanel() {
         <div style="display:flex;gap:8px;align-items:center;">
           <select id="newLinkPermission" style="padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
             <option value="view">Nur lesen</option>
+            <option value="cards_only">Nur Karten</option>
             <option value="edit">Bearbeiten</option>
           </select>
           <input type="text" id="newLinkLabel" placeholder="Bezeichnung..." style="flex:1;padding:6px;border:1px solid #e2e8f0;border-radius:6px;">
@@ -2395,7 +2665,7 @@ async function togglePermissionsPanel() {
           <div style="display:flex;justify-content:space-between;align-items:center;">
             <div>
               <strong>${esc(link.label) || 'Link'}</strong>
-              <span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${link.permission === 'edit' ? '#dbeafe' : '#f1f5f9'};color:${link.permission === 'edit' ? '#2563eb' : '#64748b'};margin-left:4px;">${link.permission === 'edit' ? 'Bearbeiten' : 'Nur lesen'}</span>
+              <span style="font-size:12px;padding:2px 6px;border-radius:4px;background:${link.permission === 'edit' ? '#dbeafe' : link.permission === 'cards_only' ? '#dcfce7' : '#f1f5f9'};color:${link.permission === 'edit' ? '#2563eb' : link.permission === 'cards_only' ? '#16a34a' : '#64748b'};margin-left:4px;">${link.permission === 'edit' ? 'Bearbeiten' : link.permission === 'cards_only' ? 'Nur Karten' : 'Nur lesen'}</span>
             </div>
             <div style="display:flex;gap:4px;">
               <button class="icon-btn" title="Link kopieren" style="font-size:14px;padding:4px 8px;" data-copy-url>&#128279;</button>

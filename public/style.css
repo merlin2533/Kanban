@@ -126,6 +126,50 @@ main#board {
   min-height: 200px;
 }
 
+.column.column-collapsed .cards {
+  display: none;
+}
+.column.column-collapsed .add-card-area {
+  display: none;
+}
+.column.column-collapsed {
+  min-width: 48px;
+  width: 48px;
+  max-width: 48px;
+}
+.collapse-col-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 4px;
+  font-size: 14px;
+  color: #64748b;
+  border-radius: 4px;
+}
+.collapse-col-btn:hover {
+  background: rgba(0,0,0,0.05);
+}
+.column.column-collapsed .column-header {
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+}
+.column.column-collapsed .column-title {
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  transform: rotate(180deg);
+  max-height: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 13px;
+}
+.column.column-collapsed .column-count,
+.column.column-collapsed .wip-badge,
+.column.column-collapsed .delete-col-btn {
+  display: none;
+}
+
 .column-header {
   padding: 12px 16px;
   display: flex;
@@ -196,6 +240,10 @@ main#board {
 }
 
 .card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+.card.kb-focused {
+  outline: 2px solid #2563eb;
+  outline-offset: 1px;
+}
 .card:active { cursor: grabbing; }
 
 .card.dragging {
@@ -207,6 +255,23 @@ main#board {
   font-size: 14px;
   line-height: 1.4;
   word-break: break-word;
+}
+.card-quick-edit-input {
+  width: 100%;
+  font-size: inherit;
+  font-family: inherit;
+  font-weight: inherit;
+  color: inherit;
+  background: #fff;
+  border: 1px solid #2563eb;
+  border-radius: 4px;
+  padding: 1px 4px;
+  margin: 0;
+  box-sizing: border-box;
+}
+.dark .card-quick-edit-input {
+  background: #1e293b;
+  color: #e2e8f0;
 }
 
 .card-meta {
@@ -1181,6 +1246,111 @@ main#board {
   outline: 2px solid #2563eb;
 }
 
+/* --- Advanced Filter Panel --- */
+.adv-filter-panel {
+  position: absolute;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.12);
+  z-index: 9999;
+  min-width: 260px;
+}
+
+.adv-filter-section {
+  margin-bottom: 10px;
+}
+
+.adv-filter-section:last-child {
+  margin-bottom: 0;
+}
+
+.adv-filter-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-bottom: 6px;
+}
+
+.adv-filter-btns {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.adv-filter-btn {
+  padding: 4px 10px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f8fafc;
+  color: #475569;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.adv-filter-btn:hover {
+  background: #e2e8f0;
+}
+
+.adv-filter-btn.active {
+  background: #2563eb;
+  border-color: #2563eb;
+  color: #fff;
+}
+
+.adv-filter-btn.priority-high.active { background: #dc2626; border-color: #dc2626; }
+.adv-filter-btn.priority-medium.active { background: #f59e0b; border-color: #f59e0b; }
+.adv-filter-btn.priority-low.active { background: #22c55e; border-color: #22c55e; }
+.adv-filter-btn.priority-high:not(.active) { color: #dc2626; border-color: #fca5a5; }
+.adv-filter-btn.priority-medium:not(.active) { color: #d97706; border-color: #fcd34d; }
+.adv-filter-btn.priority-low:not(.active) { color: #16a34a; border-color: #86efac; }
+
+.adv-filter-clear {
+  width: 100%;
+  padding: 6px;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  background: #f1f5f9;
+  color: #64748b;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.adv-filter-clear:hover {
+  background: #e2e8f0;
+}
+
+#advFilterBtn.filter-active {
+  background: #eff6ff;
+  border-color: #2563eb;
+  color: #2563eb;
+  position: relative;
+}
+
+#advFilterBtn.filter-active::after {
+  content: '';
+  position: absolute;
+  top: 3px;
+  right: 3px;
+  width: 6px;
+  height: 6px;
+  background: #2563eb;
+  border-radius: 50%;
+}
+
+/* Dark mode for adv filter panel */
+@media (prefers-color-scheme: dark) {
+  .adv-filter-panel { background: #1e293b; border-color: #475569; }
+  .adv-filter-btn { background: #334155; border-color: #475569; color: #e2e8f0; }
+  .adv-filter-btn:hover { background: #475569; }
+  .adv-filter-clear { background: #334155; border-color: #475569; color: #94a3b8; }
+  .adv-filter-clear:hover { background: #475569; }
+}
+
 /* --- Board List (index page) --- */
 .board-list {
   text-align: left;
@@ -1835,6 +2005,16 @@ main#board {
 }
 .search-result-empty { padding: 12px 14px; color: var(--color-text-faint); font-size: 13px; }
 
+/* ---- Time tracking (Zeiterfassung) ---- */
+.time-tracking-row { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 8px; }
+.time-field { display: flex; flex-direction: column; gap: 4px; }
+.time-field label { font-size: 12px; color: #64748b; font-weight: 500; }
+.time-field input[type="number"] { width: 90px; }
+.time-logged-display { font-size: 14px; padding: 6px 0; color: #334155; }
+.time-log-row { margin-top: 12px; }
+.time-log-row label { font-size: 12px; color: #64748b; font-weight: 500; }
+.card-time-badge { font-size: 11px; color: #64748b; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+
 /* ---- Card template select in column ---- */
 .card-template-select {
   width: 100%;
@@ -1871,3 +2051,15 @@ main#board {
   .desc-preview-btn { border-color: #475569; color: #94a3b8; }
   .desc-preview-btn:hover { background: #334155; }
 }
+
+/* --- Card Dependencies --- */
+.card-blocked-badge { font-size: 13px; cursor: help; }
+.dep-item { display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px; }
+.dep-card-text { flex: 1; color: #334155; }
+.dep-column { font-size: 11px; color: #94a3b8; background: #f1f5f9; padding: 2px 6px; border-radius: 4px; }
+
+.notif-prefs-list { display: flex; flex-direction: column; gap: 8px; }
+.notif-pref-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
+.notif-pref-label { font-size: 14px; color: #334155; }
+.notif-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; cursor: pointer; }
+.notif-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }

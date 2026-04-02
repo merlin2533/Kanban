@@ -122,6 +122,9 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id);
   CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at);
   CREATE INDEX IF NOT EXISTS idx_board_access_board_id ON board_access_links(board_id);
+  CREATE INDEX IF NOT EXISTS idx_activity_board_created ON activity_log(board_id, created_at DESC);
+  CREATE INDEX IF NOT EXISTS idx_cards_column_pos ON cards(column_id, position);
+  CREATE INDEX IF NOT EXISTS idx_cards_board ON cards(board_id);
 
   CREATE TABLE IF NOT EXISTS card_assignees (
     card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
@@ -159,6 +162,23 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS app_settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL DEFAULT ''
+  );
+
+  CREATE TABLE IF NOT EXISTS card_dependencies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    blocking_card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    blocked_card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now')),
+    UNIQUE(blocking_card_id, blocked_card_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_deps_blocking ON card_dependencies(blocking_card_id);
+  CREATE INDEX IF NOT EXISTS idx_deps_blocked ON card_dependencies(blocked_card_id);
+
+  CREATE TABLE IF NOT EXISTS notification_prefs (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    email_enabled INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, event_type)
   );
 `);
 
@@ -271,6 +291,10 @@ try {
 } catch {
   db.exec("ALTER TABLE boards ADD COLUMN public_access TEXT DEFAULT NULL");
 }
+
+// Migration: add time tracking columns to cards
+try { db.prepare('ALTER TABLE cards ADD COLUMN time_estimate INTEGER DEFAULT NULL').run(); } catch {}
+try { db.prepare('ALTER TABLE cards ADD COLUMN time_logged INTEGER DEFAULT NULL').run(); } catch {}
 
 // Card templates table (per-board)
 db.exec(`
@@ -387,8 +411,9 @@ function getBoardPublicAccess(boardId) {
 }
 
 function setBoardPublicAccess(boardId, permission) {
-  // permission: 'view', 'edit', or null to disable
-  const value = permission === 'edit' ? 'edit' : permission === 'view' ? 'view' : null;
+  // permission: 'view', 'edit', 'cards_only', or null to disable
+  const validPerms = ['edit', 'cards_only', 'view'];
+  const value = validPerms.includes(permission) ? permission : null;
   db.prepare('UPDATE boards SET public_access = ? WHERE id = ?').run(value, boardId);
   // Maintain synthetic access link with fixed ID 'pub_<boardId>'
   const syntheticId = 'pub_' + boardId;
@@ -577,6 +602,7 @@ function getBoard(id) {
 
   board.columns = columns;
   board.labels = db.prepare('SELECT * FROM labels WHERE board_id = ? ORDER BY name').all(id);
+  board.blockedCardIds = getBlockedCardIds(id);
   return board;
 }
 
@@ -695,8 +721,9 @@ function updateCard(id, updates) {
   const due_date = updates.due_date !== undefined ? updates.due_date : card.due_date;
   const priority = updates.priority !== undefined ? updates.priority : card.priority;
   const recurrence = updates.recurrence !== undefined ? updates.recurrence : card.recurrence;
+  const time_estimate = updates.time_estimate !== undefined ? updates.time_estimate : card.time_estimate;
 
-  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, recurrence = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, recurrence, id);
+  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, recurrence = ?, time_estimate = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, recurrence, time_estimate, id);
 
   const updated = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(updated.column_id);
@@ -968,8 +995,12 @@ function getArchivedCards(boardId) {
 
 // --- Comments ---
 
-function getComments(cardId) {
-  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at DESC').all(cardId);
+function getComments(cardId, limit = 20, offset = 0) {
+  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(cardId, limit, offset);
+}
+
+function getCardCommentCount(cardId) {
+  return db.prepare('SELECT COUNT(*) as count FROM comments WHERE card_id = ?').get(cardId).count;
 }
 
 function createComment(cardId, text, author) {
@@ -1000,7 +1031,9 @@ function deleteComment(id) {
 function getActivity(boardId, limit = 50, offset = 0) {
   limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
   offset = Math.max(0, parseInt(offset) || 0);
-  return db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(boardId, limit, offset);
+  const items = db.prepare('SELECT * FROM activity_log WHERE board_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(boardId, limit, offset);
+  const total = db.prepare('SELECT COUNT(*) as count FROM activity_log WHERE board_id = ?').get(boardId).count;
+  return { items, total };
 }
 
 // --- Export/Import ---
@@ -1262,6 +1295,77 @@ function getAllSettings() {
   return Object.fromEntries(db.prepare('SELECT key, value FROM app_settings').all().map(r => [r.key, r.value]));
 }
 
+// --- Time Tracking ---
+function logTime(cardId, minutes) {
+  const card = db.prepare('SELECT time_logged FROM cards WHERE id = ?').get(cardId);
+  if (!card) return null;
+  const newTotal = (card.time_logged || 0) + minutes;
+  db.prepare('UPDATE cards SET time_logged = ? WHERE id = ?').run(newTotal, cardId);
+  return db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
+}
+
+// --- Card Dependencies ---
+
+function getCardDependencies(cardId) {
+  const blocking = db.prepare(`
+    SELECT c.id, c.text, c.column_id, col.title as column_title
+    FROM card_dependencies cd
+    JOIN cards c ON c.id = cd.blocking_card_id
+    JOIN columns col ON col.id = c.column_id
+    WHERE cd.blocked_card_id = ?
+  `).all(cardId);
+  const blocked = db.prepare(`
+    SELECT c.id, c.text, c.column_id, col.title as column_title
+    FROM card_dependencies cd
+    JOIN cards c ON c.id = cd.blocked_card_id
+    JOIN columns col ON col.id = c.column_id
+    WHERE cd.blocking_card_id = ?
+  `).all(cardId);
+  return { blocking, blocked };
+}
+
+function addCardDependency(blockingCardId, blockedCardId) {
+  if (blockingCardId === blockedCardId) throw new Error('Card cannot depend on itself');
+  db.prepare('INSERT OR IGNORE INTO card_dependencies (blocking_card_id, blocked_card_id) VALUES (?, ?)').run(blockingCardId, blockedCardId);
+}
+
+function removeCardDependency(blockingCardId, blockedCardId) {
+  db.prepare('DELETE FROM card_dependencies WHERE blocking_card_id = ? AND blocked_card_id = ?').run(blockingCardId, blockedCardId);
+}
+
+function getBlockedCardIds(boardId) {
+  return db.prepare(`
+    SELECT DISTINCT cd.blocked_card_id as id
+    FROM card_dependencies cd
+    JOIN cards c ON c.id = cd.blocked_card_id
+    JOIN columns col ON col.id = c.column_id
+    WHERE col.board_id = ?
+  `).all(boardId).map(r => r.id);
+}
+
+// --- Notification Preferences ---
+
+const NOTIFICATION_EVENT_TYPES = [
+  'card_created', 'card_assigned', 'card_due_soon',
+  'comment_added', 'card_archived', 'board_updated'
+];
+
+function getNotificationPrefs(userId) {
+  const rows = db.prepare('SELECT * FROM notification_prefs WHERE user_id = ?').all(userId);
+  const prefs = {};
+  for (const et of NOTIFICATION_EVENT_TYPES) {
+    const row = rows.find(r => r.event_type === et);
+    prefs[et] = { email_enabled: row ? !!row.email_enabled : false };
+  }
+  return prefs;
+}
+
+function setNotificationPref(userId, eventType, emailEnabled) {
+  if (!NOTIFICATION_EVENT_TYPES.includes(eventType)) throw new Error('Invalid event type');
+  db.prepare('INSERT OR REPLACE INTO notification_prefs (user_id, event_type, email_enabled) VALUES (?, ?, ?)')
+    .run(userId, eventType, emailEnabled ? 1 : 0);
+}
+
 // --- Raw DB access ---
 
 function getDb() { return db; }
@@ -1273,7 +1377,7 @@ module.exports = {
   createColumn, updateColumn, deleteColumn, moveColumn,
   getColumnBoardId, getCardBoardId,
   // Cards
-  createCard, updateCard, deleteCard, moveCard, duplicateCard,
+  createCard, updateCard, deleteCard, moveCard, duplicateCard, logTime,
   // Checklist
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   // Attachments
@@ -1291,7 +1395,7 @@ module.exports = {
   // Archive
   archiveCard, restoreCard, getArchivedCards,
   // Comments
-  getComments, createComment, updateComment, deleteComment,
+  getComments, getCardCommentCount, createComment, updateComment, deleteComment,
   // Export/Import
   exportBoard, importBoard,
   // Auth
@@ -1311,6 +1415,10 @@ module.exports = {
   getSetting, setSetting, initSetting, getAllSettings,
   // Public board access
   getBoardPublicAccess, setBoardPublicAccess,
+  // Card Dependencies
+  getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
+  // Notification Preferences
+  getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
   // Raw DB
   getDb,
 };

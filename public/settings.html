@@ -122,6 +122,14 @@
       <p>Dein Profil und Passwort verwalten.</p>
     </div>
 
+    <div class="settings-card" id="notificationPrefsSection">
+      <h2>Benachrichtigungen</h2>
+      <p style="color:#64748b;font-size:14px;margin-bottom:16px;">Wähle, für welche Ereignisse du per E-Mail benachrichtigt werden möchtest.</p>
+      <div id="notifPrefsList" class="notif-prefs-list">
+        <div style="color:#94a3b8;font-size:14px;">Lade...</div>
+      </div>
+    </div>
+
     <div class="settings-card">
       <h2>Passwort aendern</h2>
       <div class="pw-status" id="passwordAge"></div>
@@ -210,6 +218,57 @@
     };
 
     init();
+
+    async function loadNotificationPrefs() {
+      const section = document.getElementById('notifPrefsList');
+      if (!section) return;
+      try {
+        const [prefs, types] = await Promise.all([
+          fetch('/api/me/notification-prefs').then(r => r.json()),
+          fetch('/api/me/notification-event-types').then(r => r.json())
+        ]);
+
+        const labels = {
+          card_created: 'Neue Karte erstellt',
+          card_assigned: 'Karte zugewiesen',
+          card_due_soon: 'Karte bald fällig',
+          comment_added: 'Kommentar hinzugefügt',
+          card_archived: 'Karte archiviert',
+          board_updated: 'Board geändert'
+        };
+
+        section.innerHTML = '';
+        for (const et of types) {
+          const pref = prefs[et] || { email_enabled: false };
+          const row = document.createElement('div');
+          row.className = 'notif-pref-row';
+          row.innerHTML = `
+            <span class="notif-pref-label">${labels[et] || et}</span>
+            <label class="notif-toggle">
+              <input type="checkbox" data-event="${et}" ${pref.email_enabled ? 'checked' : ''}>
+              <span>E-Mail</span>
+            </label>
+          `;
+          section.appendChild(row);
+        }
+
+        section.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+          cb.onchange = async () => {
+            await fetch('/api/me/notification-prefs', {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' },
+              body: JSON.stringify({ event_type: cb.dataset.event, email_enabled: cb.checked })
+            });
+          };
+        });
+      } catch (e) {
+        section.innerHTML = '<div style="color:#dc2626;">Fehler beim Laden.</div>';
+      }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      loadNotificationPrefs();
+    });
   </script>
 </body>
 </html>
