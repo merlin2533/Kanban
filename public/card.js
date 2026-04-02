@@ -374,6 +374,7 @@ function renderCardPage() {
 // --- Comments pagination state ---
 let commentOffset = 0;
 const COMMENT_PAGE_SIZE = 20;
+let commentLoading = false;
 
 // --- Render a single comment ---
 function renderComment(comment) {
@@ -465,7 +466,10 @@ function renderComment(comment) {
 
 // --- Load comments with pagination ---
 async function loadComments(append = false) {
+  if (commentLoading) return;
+  commentLoading = true;
   if (!append) commentOffset = 0;
+  try {
   const data = await api(`/api/cards/${cardId}/comments?limit=${COMMENT_PAGE_SIZE}&offset=${commentOffset}`);
 
   // Handle both old format (array) and new format (object with .comments)
@@ -514,6 +518,7 @@ async function loadComments(append = false) {
   } else if (loadMoreBtn) {
     loadMoreBtn.remove();
   }
+  } catch (e) { showError(e.message); } finally { commentLoading = false; }
 }
 
 // --- Render comments (kept for initial load from card data) ---
@@ -599,6 +604,7 @@ async function loadDependencies() {
 }
 
 function renderDependencies(deps) {
+  if (!deps) deps = { blocking: [], blocked: [] };
   let section = document.getElementById('dependenciesSection');
   if (!section) {
     section = document.createElement('div');
@@ -610,6 +616,14 @@ function renderDependencies(deps) {
   }
 
   section.innerHTML = `<div class="card-field-label">Abhängigkeiten</div>`;
+
+  if (deps.blocking.length === 0 && !canEdit()) {
+    const empty = document.createElement('p');
+    empty.style.cssText = 'color:#94a3b8;font-size:13px;margin:4px 0;';
+    empty.textContent = 'Keine Abhängigkeiten';
+    section.appendChild(empty);
+    return;
+  }
 
   if (deps.blocking.length > 0) {
     const blockingDiv = document.createElement('div');
@@ -643,7 +657,8 @@ function renderDependencies(deps) {
     section.appendChild(addDiv);
     document.getElementById('addDepBtn').onclick = async () => {
       const blockingId = parseInt(document.getElementById('depCardIdInput').value);
-      if (!blockingId) return;
+      if (isNaN(blockingId) || blockingId <= 0) return;
+      if (blockingId === cardId) { showError('Karte kann nicht von sich selbst blockiert werden'); return; }
       try {
         await api(`/api/cards/${cardId}/dependencies`, 'POST', { blocking_card_id: blockingId });
         document.getElementById('depCardIdInput').value = '';
@@ -1249,11 +1264,12 @@ function setupEvents() {
       if (!mins || mins < 1) return;
       try {
         const updated = await api(`/api/cards/${cardId}/log-time`, 'POST', { minutes: mins });
-        document.getElementById('timeLogInput').value = '';
         const timeLoggedDisplayEl = document.getElementById('timeLoggedDisplay');
         const logged = updated.time_logged || 0;
         if (timeLoggedDisplayEl) timeLoggedDisplayEl.textContent = `${logged} Min (${Math.floor(logged/60)}h ${logged%60}m)`;
-      } catch (e) { showError(e.message); }
+      } catch (e) { showError(e.message); } finally {
+        document.getElementById('timeLogInput').value = '';
+      }
     };
   }
 

@@ -996,7 +996,7 @@ function getArchivedCards(boardId) {
 // --- Comments ---
 
 function getComments(cardId, limit = 20, offset = 0) {
-  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?').all(cardId, limit, offset);
+  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at DESC LIMIT ? OFFSET ?').all(cardId, limit, offset);
 }
 
 function getCardCommentCount(cardId) {

@@ -5,8 +5,8 @@ let currentCardId = null;
 const modifiedCards = new Set();
 
 // --- Advanced Filter State ---
-let activePriorityFilter = localStorage.getItem('kanban_priority_filter') || null;
-let activeDueFilter = localStorage.getItem('kanban_due_filter') || null;
+let activePriorityFilter = localStorage.getItem('kanban_priority_filter_' + boardId) || null;
+let activeDueFilter = localStorage.getItem('kanban_due_filter_' + boardId) || null;
 
 // --- Undo Stack ---
 const undoStack = [];
@@ -461,8 +461,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         filterBtn.classList.remove('filter-active');
       }
     }
-    localStorage.setItem('kanban_priority_filter', activePriorityFilter || '');
-    localStorage.setItem('kanban_due_filter', activeDueFilter || '');
+    localStorage.setItem('kanban_priority_filter_' + boardId, activePriorityFilter || '');
+    localStorage.setItem('kanban_due_filter_' + boardId, activeDueFilter || '');
   }
 
   // Advanced filter panel
@@ -541,8 +541,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('clearAllFiltersBtn').onclick = () => {
     activePriorityFilter = null;
     activeDueFilter = null;
-    localStorage.removeItem('kanban_priority_filter');
-    localStorage.removeItem('kanban_due_filter');
+    localStorage.removeItem('kanban_priority_filter_' + boardId);
+    localStorage.removeItem('kanban_due_filter_' + boardId);
     labelFilter.value = '';
     document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
     document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
@@ -2268,9 +2268,13 @@ function setupActivityPanel() {
 
 let activityOffset = 0;
 const ACTIVITY_PAGE_SIZE = 30;
+let activityLoading = false;
 
 async function loadActivity(append = false) {
+  if (activityLoading) return;
+  activityLoading = true;
   if (!append) activityOffset = 0;
+  try {
   const data = await api(`/api/boards/${boardId}/activity?limit=${ACTIVITY_PAGE_SIZE}&offset=${activityOffset}`);
 
   // Handle both old array format and new paginated format
@@ -2308,6 +2312,7 @@ async function loadActivity(append = false) {
   } else if (moreBtn) {
     moreBtn.remove();
   }
+  } catch (e) { showError(e.message); } finally { activityLoading = false; }
 }
 
 async function toggleActivity() {
