@@ -277,7 +277,8 @@ function renderCardPage() {
   renderCardLabels(card.labels || []);
   renderChecklist(card.checklist || []);
   renderAttachments(card.attachments || []);
-  renderComments(card.comments || []);
+  // Initial comment load with pagination
+  loadComments(false).catch(e => showError(e.message));
   renderRecurrence();
 
   // Move: populate column select
@@ -356,11 +357,159 @@ function renderCardPage() {
   }
 }
 
-// --- Render comments (newest first) ---
+// --- Comments pagination state ---
+let commentOffset = 0;
+const COMMENT_PAGE_SIZE = 20;
+
+// --- Render a single comment ---
+function renderComment(comment) {
+  const item = document.createElement('div');
+  item.className = 'comment-item';
+
+  if (comment.author) {
+    const authorDiv = document.createElement('div');
+    authorDiv.className = 'comment-author';
+    const dot = document.createElement('span');
+    dot.className = 'comment-author-dot';
+    dot.textContent = comment.author.charAt(0).toUpperCase();
+    dot.style.background = stringToColor(comment.author);
+    authorDiv.appendChild(dot);
+    const name = document.createElement('span');
+    name.className = 'comment-author-name';
+    name.textContent = comment.author;
+    authorDiv.appendChild(name);
+    item.appendChild(authorDiv);
+  }
+
+  const text = document.createElement('div');
+  text.className = 'comment-text';
+  text.innerHTML = renderMarkdown(comment.text);
+
+  const footer = document.createElement('div');
+  footer.className = 'comment-footer';
+  const time = document.createElement('span');
+  time.className = 'comment-time';
+  time.textContent = formatTime(comment.created_at);
+  const actions = document.createElement('span');
+  actions.className = 'comment-actions';
+
+  if (canEdit()) {
+    const edit = document.createElement('button');
+    edit.className = 'comment-edit';
+    edit.innerHTML = '&#9998;';
+    edit.title = 'Bearbeiten';
+    edit.onclick = () => {
+      const editArea = document.createElement('textarea');
+      editArea.className = 'comment-edit-area';
+      editArea.value = comment.text;
+      editArea.rows = 3;
+      text.replaceWith(editArea);
+      editArea.addEventListener('paste', (e) => handleImagePaste(e, editArea));
+      editArea.focus();
+      const saveRow = document.createElement('div');
+      saveRow.className = 'comment-edit-actions';
+      const saveBtn = document.createElement('button');
+      saveBtn.textContent = 'Speichern';
+      saveBtn.className = 'comment-save-btn';
+      saveBtn.onclick = async () => {
+        const newText = editArea.value.trim();
+        if (!newText) return;
+        try {
+          await api(`/api/comments/${comment.id}`, 'PATCH', { text: newText });
+          reloadComments();
+        } catch (e) { showError(e.message); }
+      };
+      const cancelBtn = document.createElement('button');
+      cancelBtn.textContent = 'Abbrechen';
+      cancelBtn.className = 'comment-cancel-btn';
+      cancelBtn.onclick = () => reloadComments();
+      saveRow.appendChild(saveBtn);
+      saveRow.appendChild(cancelBtn);
+      editArea.insertAdjacentElement('afterend', saveRow);
+    };
+    actions.appendChild(edit);
+  }
+
+  const del = document.createElement('button');
+  del.className = 'comment-delete';
+  del.innerHTML = '&times;';
+  del.title = 'Löschen';
+  del.onclick = async () => {
+    try {
+      await api(`/api/comments/${comment.id}`, 'DELETE');
+      reloadComments();
+    } catch (e) { showError(e.message); }
+  };
+  actions.appendChild(del);
+
+  footer.appendChild(time);
+  footer.appendChild(actions);
+  item.appendChild(text);
+  item.appendChild(footer);
+  return item;
+}
+
+// --- Load comments with pagination ---
+async function loadComments(append = false) {
+  if (!append) commentOffset = 0;
+  const data = await api(`/api/cards/${cardId}/comments?limit=${COMMENT_PAGE_SIZE}&offset=${commentOffset}`);
+
+  // Handle both old format (array) and new format (object with .comments)
+  const comments = Array.isArray(data) ? data : data.comments;
+  const total = Array.isArray(data) ? comments.length : data.total;
+
+  const container = document.getElementById('commentsList');
+  if (!container) return;
+
+  if (!append) {
+    container.innerHTML = '';
+    // Remove any existing load-more button
+    const existing = document.getElementById('loadMoreCommentsBtn');
+    if (existing) existing.remove();
+  }
+
+  if (!append && comments.length === 0) {
+    const empty = document.createElement('p');
+    empty.className = 'comments-empty';
+    empty.textContent = 'Noch keine Kommentare.';
+    container.appendChild(empty);
+    commentOffset = 0;
+    return;
+  }
+
+  for (const comment of comments) {
+    container.appendChild(renderComment(comment));
+  }
+
+  commentOffset += comments.length;
+
+  // Show/hide load more button
+  let loadMoreBtn = document.getElementById('loadMoreCommentsBtn');
+  const hasMore = commentOffset < total;
+
+  if (hasMore) {
+    if (!loadMoreBtn) {
+      loadMoreBtn = document.createElement('button');
+      loadMoreBtn.id = 'loadMoreCommentsBtn';
+      loadMoreBtn.className = 'btn-secondary';
+      loadMoreBtn.style.cssText = 'width:100%;margin-top:8px;';
+      loadMoreBtn.textContent = 'Ältere Kommentare laden';
+      loadMoreBtn.onclick = () => loadComments(true);
+      container.after(loadMoreBtn);
+    }
+  } else if (loadMoreBtn) {
+    loadMoreBtn.remove();
+  }
+}
+
+// --- Render comments (kept for initial load from card data) ---
 function renderComments(comments) {
   const container = document.getElementById('commentsList');
   if (!container) return;
   container.innerHTML = '';
+  // Remove stale load-more button
+  const existing = document.getElementById('loadMoreCommentsBtn');
+  if (existing) existing.remove();
 
   if (comments.length === 0) {
     const empty = document.createElement('p');
@@ -370,92 +519,8 @@ function renderComments(comments) {
     return;
   }
 
-  // API already returns newest first (ORDER BY created_at DESC)
   for (const comment of comments) {
-    const item = document.createElement('div');
-    item.className = 'comment-item';
-
-    if (comment.author) {
-      const authorDiv = document.createElement('div');
-      authorDiv.className = 'comment-author';
-      const dot = document.createElement('span');
-      dot.className = 'comment-author-dot';
-      dot.textContent = comment.author.charAt(0).toUpperCase();
-      dot.style.background = stringToColor(comment.author);
-      authorDiv.appendChild(dot);
-      const name = document.createElement('span');
-      name.className = 'comment-author-name';
-      name.textContent = comment.author;
-      authorDiv.appendChild(name);
-      item.appendChild(authorDiv);
-    }
-
-    const text = document.createElement('div');
-    text.className = 'comment-text';
-    text.innerHTML = renderMarkdown(comment.text);
-
-    const footer = document.createElement('div');
-    footer.className = 'comment-footer';
-    const time = document.createElement('span');
-    time.className = 'comment-time';
-    time.textContent = formatTime(comment.created_at);
-    const actions = document.createElement('span');
-    actions.className = 'comment-actions';
-
-    if (canEdit()) {
-      const edit = document.createElement('button');
-      edit.className = 'comment-edit';
-      edit.innerHTML = '&#9998;';
-      edit.title = 'Bearbeiten';
-      edit.onclick = () => {
-        const editArea = document.createElement('textarea');
-        editArea.className = 'comment-edit-area';
-        editArea.value = comment.text;
-        editArea.rows = 3;
-        text.replaceWith(editArea);
-        editArea.addEventListener('paste', (e) => handleImagePaste(e, editArea));
-        editArea.focus();
-        const saveRow = document.createElement('div');
-        saveRow.className = 'comment-edit-actions';
-        const saveBtn = document.createElement('button');
-        saveBtn.textContent = 'Speichern';
-        saveBtn.className = 'comment-save-btn';
-        saveBtn.onclick = async () => {
-          const newText = editArea.value.trim();
-          if (!newText) return;
-          try {
-            await api(`/api/comments/${comment.id}`, 'PATCH', { text: newText });
-            reloadComments();
-          } catch (e) { showError(e.message); }
-        };
-        const cancelBtn = document.createElement('button');
-        cancelBtn.textContent = 'Abbrechen';
-        cancelBtn.className = 'comment-cancel-btn';
-        cancelBtn.onclick = () => reloadComments();
-        saveRow.appendChild(saveBtn);
-        saveRow.appendChild(cancelBtn);
-        editArea.insertAdjacentElement('afterend', saveRow);
-      };
-      actions.appendChild(edit);
-    }
-
-    const del = document.createElement('button');
-    del.className = 'comment-delete';
-    del.innerHTML = '&times;';
-    del.title = 'Löschen';
-    del.onclick = async () => {
-      try {
-        await api(`/api/comments/${comment.id}`, 'DELETE');
-        reloadComments();
-      } catch (e) { showError(e.message); }
-    };
-    actions.appendChild(del);
-
-    footer.appendChild(time);
-    footer.appendChild(actions);
-    item.appendChild(text);
-    item.appendChild(footer);
-    container.appendChild(item);
+    container.appendChild(renderComment(comment));
   }
 }
 
@@ -475,8 +540,7 @@ async function addComment() {
 
 async function reloadComments() {
   try {
-    const comments = await api(`/api/cards/${cardId}/comments`);
-    renderComments(comments);
+    await loadComments(false);
   } catch (e) { showError(e.message); }
 }
 
