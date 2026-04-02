@@ -511,7 +511,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     e.stopPropagation();
     const isHidden = advFilterPanel.classList.contains('hidden');
     advFilterPanel.classList.toggle('hidden');
-    if (isHidden) positionFilterPanel();
+    if (isHidden) requestAnimationFrame(positionFilterPanel);
   };
 
   document.addEventListener('click', (e) => {
@@ -1075,7 +1075,7 @@ function createColumnEl(col) {
   collapseBtn.className = 'collapse-col-btn';
   collapseBtn.title = 'Spalte einklappen';
 
-  const isCollapsed = localStorage.getItem('col_collapsed_' + col.id) === 'true';
+  const isCollapsed = localStorage.getItem('col_collapsed_' + boardId + '_' + col.id) === 'true';
   if (isCollapsed) {
     div.classList.add('column-collapsed');
     collapseBtn.textContent = '▸';
@@ -1085,7 +1085,7 @@ function createColumnEl(col) {
 
   collapseBtn.onclick = () => {
     const collapsed = div.classList.toggle('column-collapsed');
-    localStorage.setItem('col_collapsed_' + col.id, collapsed ? 'true' : 'false');
+    localStorage.setItem('col_collapsed_' + boardId + '_' + col.id, collapsed ? 'true' : 'false');
     collapseBtn.textContent = collapsed ? '▸' : '▾';
   };
 

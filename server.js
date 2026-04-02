@@ -348,7 +348,8 @@ app.get('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req,
 
 app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req, res) => {
   const validPerms = ['edit', 'cards_only', 'view'];
-  const permission = validPerms.includes(req.body.permission) ? req.body.permission : 'view';
+  if (!validPerms.includes(req.body.permission)) return res.status(400).json({ error: 'Invalid permission value' });
+  const permission = req.body.permission;
   const label = validString(req.body.label, 200) || '';
   const link = db.createBoardAccessLink(req.params.boardId, permission, label);
   res.status(201).json(link);
@@ -1254,8 +1255,8 @@ app.use((err, req, res, next) => {
   res.status(status).json({ error: err.message || 'Internal server error' });
 });
 
-process.on('unhandledRejection', (reason) => {
-  console.error('[UNHANDLED REJECTION]', reason);
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('[UNHANDLED REJECTION]', reason, 'Promise:', promise);
 });
 
 // --- Start ---
