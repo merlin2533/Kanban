@@ -1170,16 +1170,23 @@ function createColumnEl(col) {
   addCard.className = 'add-card';
   const addInput = document.createElement('input');
   addInput.placeholder = '+ Karte hinzufügen...';
+  let addingCard = false;
   addInput.onkeydown = async (e) => {
-    if (e.key === 'Enter' && addInput.value.trim()) {
-      try {
-        const newCard = await api(`/api/columns/${col.id}/cards`, 'POST', { text: addInput.value.trim() });
-        addInput.value = '';
-        const token = window._accessToken ? `?token=${window._accessToken}` : '';
-        window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
-      } catch (e) {
-        showError(e.message);
-      }
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    const text = addInput.value.trim();
+    if (!text || addingCard) return;
+    addingCard = true;
+    addInput.disabled = true;
+    try {
+      const newCard = await api(`/api/columns/${col.id}/cards`, 'POST', { text });
+      addInput.value = '';
+      const token = window._accessToken ? `?token=${window._accessToken}` : '';
+      window.location.href = `/board/${boardId}/card/${newCard.id}${token}`;
+    } catch (err) {
+      showError(err.message);
+      addInput.disabled = false;
+      addingCard = false;
     }
   };
   addCard.appendChild(addInput);
