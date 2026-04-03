@@ -137,8 +137,17 @@
       <p>Dein Profil und Passwort verwalten.</p>
     </div>
 
+    <div class="settings-card" id="pushNotifSection">
+      <h2>Push-Benachrichtigungen</h2>
+      <p style="color:#64748b;font-size:14px;margin-bottom:16px;">Erhalte Benachrichtigungen auf deinem Handy, wenn sich beobachtete Karten ändern.</p>
+      <div style="display:flex;align-items:center;gap:12px;">
+        <button id="pushToggleBtn" class="btn-primary" style="min-width:200px;">Push aktivieren</button>
+        <span id="pushStatus" style="font-size:13px;color:#64748b;"></span>
+      </div>
+    </div>
+
     <div class="settings-card" id="notificationPrefsSection">
-      <h2>Benachrichtigungen</h2>
+      <h2>E-Mail-Benachrichtigungen</h2>
       <p style="color:#64748b;font-size:14px;margin-bottom:16px;">Wähle, für welche Ereignisse du per E-Mail benachrichtigt werden möchtest.</p>
       <div id="notifPrefsList" class="notif-prefs-list">
         <div style="color:#94a3b8;font-size:14px;">Lade...</div>
@@ -281,8 +290,86 @@
       }
     }
 
+    // --- Push Notification Management ---
+    function urlBase64ToUint8Array(base64String) {
+      var padding = '='.repeat((4 - base64String.length % 4) % 4);
+      var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+      var rawData = atob(base64);
+      var outputArray = new Uint8Array(rawData.length);
+      for (var i = 0; i < rawData.length; ++i) outputArray[i] = rawData.charCodeAt(i);
+      return outputArray;
+    }
+
+    async function initPushUI() {
+      var btn = document.getElementById('pushToggleBtn');
+      var status = document.getElementById('pushStatus');
+
+      if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
+        btn.disabled = true;
+        btn.textContent = 'Nicht unterstützt';
+        status.textContent = 'Dein Browser unterstützt keine Push-Benachrichtigungen.';
+        return;
+      }
+
+      var reg = await navigator.serviceWorker.ready;
+      var sub = await reg.pushManager.getSubscription();
+
+      function updateUI(isSubscribed) {
+        if (isSubscribed) {
+          btn.textContent = 'Push deaktivieren';
+          btn.style.background = '#dc2626';
+          status.textContent = 'Push-Benachrichtigungen sind aktiv.';
+        } else {
+          btn.textContent = 'Push aktivieren';
+          btn.style.background = '#2563eb';
+          status.textContent = '';
+        }
+      }
+
+      updateUI(!!sub);
+
+      btn.onclick = async function() {
+        btn.disabled = true;
+        try {
+          if (sub) {
+            await fetch('/api/push/unsubscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+              body: JSON.stringify({ endpoint: sub.endpoint })
+            });
+            await sub.unsubscribe();
+            sub = null;
+            updateUI(false);
+          } else {
+            var perm = await Notification.requestPermission();
+            if (perm !== 'granted') {
+              status.textContent = 'Benachrichtigungen wurden blockiert. Bitte erlaube sie in den Browser-Einstellungen.';
+              btn.disabled = false;
+              return;
+            }
+            var keyRes = await fetch('/api/push/vapid-key');
+            var keyData = await keyRes.json();
+            sub = await reg.pushManager.subscribe({
+              userVisibleOnly: true,
+              applicationServerKey: urlBase64ToUint8Array(keyData.publicKey)
+            });
+            await fetch('/api/push/subscribe', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+              body: JSON.stringify(sub.toJSON())
+            });
+            updateUI(true);
+          }
+        } catch (err) {
+          status.textContent = 'Fehler: ' + err.message;
+        }
+        btn.disabled = false;
+      };
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
       loadNotificationPrefs();
+      initPushUI();
     });
   </script>
   <script src="/pwa-install.js"></script>

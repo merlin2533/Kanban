@@ -4,6 +4,7 @@ const path = require('path');
 const fs = require('fs');
 const http = require('http');
 const https = require('https');
+const webpush = require('web-push');
 const db = require('./db');
 
 const app = express();
@@ -15,6 +16,17 @@ db.initSetting('email_from',               process.env.EMAIL_FROM               
 db.initSetting('reminder_interval_hours',  process.env.REMINDER_INTERVAL_HOURS  || '24');
 db.initSetting('reminder_escalation_days', process.env.REMINDER_ESCALATION_DAYS || '3');
 db.initSetting('api_key',                  process.env.API_KEY                  || require('crypto').randomBytes(24).toString('hex'));
+
+// --- VAPID keys for Web Push ---
+if (!db.getSetting('vapid_public_key') || !db.getSetting('vapid_private_key')) {
+  const vapidKeys = webpush.generateVAPIDKeys();
+  db.setSetting('vapid_public_key', vapidKeys.publicKey);
+  db.setSetting('vapid_private_key', vapidKeys.privateKey);
+}
+const VAPID_PUBLIC = db.getSetting('vapid_public_key');
+const VAPID_PRIVATE = db.getSetting('vapid_private_key');
+const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@kanban.local';
+webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 
 // Ensure uploads directory exists
 const uploadsDir = path.join(__dirname, 'uploads');
@@ -320,6 +332,106 @@ app.get('/api/me/notification-event-types', authMiddleware, (req, res) => {
   if (!req.user) return res.status(401).json({ error: 'Login required' });
   res.json(db.NOTIFICATION_EVENT_TYPES);
 });
+
+// --- VAPID Public Key ---
+app.get('/api/push/vapid-key', (req, res) => {
+  res.json({ publicKey: VAPID_PUBLIC });
+});
+
+// --- Push Subscriptions ---
+app.post('/api/push/subscribe', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const sub = req.body;
+  if (!sub || !sub.endpoint || !sub.keys || !sub.keys.p256dh || !sub.keys.auth) {
+    return res.status(400).json({ error: 'Invalid subscription' });
+  }
+  db.savePushSubscription(req.user.id, sub);
+  res.json({ ok: true });
+});
+
+app.post('/api/push/unsubscribe', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const { endpoint } = req.body;
+  if (endpoint) db.removePushSubscription(endpoint);
+  res.json({ ok: true });
+});
+
+// --- Card Watchers ---
+app.get('/api/cards/:cardId/watchers', authMiddleware, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  res.json(db.getCardWatchers(id));
+});
+
+app.post('/api/cards/:cardId/watch', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  db.watchCard(id, req.user.id);
+  res.json({ ok: true, watching: true });
+});
+
+app.delete('/api/cards/:cardId/watch', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  db.unwatchCard(id, req.user.id);
+  res.json({ ok: true, watching: false });
+});
+
+app.get('/api/cards/:cardId/watching', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  res.json({ watching: db.isWatchingCard(id, req.user.id) });
+});
+
+// --- Push Notification Helper ---
+function sendPushToCardWatchers(cardId, action, details, excludeUserId) {
+  try {
+    const watchers = db.getCardWatchers(cardId);
+    const watcherIds = watchers.map(w => w.id).filter(id => id !== excludeUserId);
+    if (!watcherIds.length) return;
+    const subs = db.getPushSubscriptionsForUsers(watcherIds);
+    if (!subs.length) return;
+
+    const card = db.getDb().prepare('SELECT text FROM cards WHERE id = ?').get(cardId);
+    const cardTitle = card ? card.text : 'Karte';
+    const actionLabels = {
+      card_updated: 'wurde aktualisiert',
+      card_moved: 'wurde verschoben',
+      comment_added: 'neuer Kommentar',
+      checklist_item_created: 'neuer Checklist-Eintrag',
+      checklist_item_updated: 'Checklist aktualisiert',
+      card_archived: 'wurde archiviert',
+      file_uploaded: 'neue Datei hochgeladen',
+      card_assigned: 'wurde zugewiesen',
+    };
+    const body = details.user
+      ? `${details.user}: ${actionLabels[action] || action}`
+      : actionLabels[action] || action;
+
+    const payload = JSON.stringify({
+      title: cardTitle,
+      body: body,
+      data: { cardId, action }
+    });
+
+    for (const sub of subs) {
+      const pushSub = {
+        endpoint: sub.endpoint,
+        keys: { p256dh: sub.keys_p256dh, auth: sub.keys_auth }
+      };
+      webpush.sendNotification(pushSub, payload).catch(err => {
+        if (err.statusCode === 410 || err.statusCode === 404) {
+          db.removePushSubscription(sub.endpoint);
+        }
+      });
+    }
+  } catch (err) {
+    console.error('[PUSH]', err.message);
+  }
+}
 
 // --- Admin ---
 app.get('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
@@ -726,6 +838,7 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   const boardId = db.getCardBoardId(id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated', cardId: id, user });
+  sendPushToCardWatchers(id, 'card_updated', { user }, req.user?.id);
   res.json(card);
 });
 
@@ -769,6 +882,7 @@ app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
   const boardId = db.getColumnBoardId(card.column_id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_moved', cardId: id, user });
+  sendPushToCardWatchers(id, 'card_moved', { user }, req.user?.id);
   res.json(card);
 });
 
@@ -824,6 +938,7 @@ app.put('/api/cards/:cardId/archive', authMiddleware, requireEdit, (req, res) =>
     }
   }
   broadcast(boardId, { type: 'update', action: 'card_archived' });
+  sendPushToCardWatchers(id, 'card_archived', { user: getRequestUser(req) }, req.user?.id);
   res.json(card);
 });
 
@@ -855,6 +970,7 @@ app.post('/api/cards/:cardId/checklist', authMiddleware, requireEdit, (req, res)
   if (!item) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_created' });
+  sendPushToCardWatchers(id, 'checklist_item_created', { user: getRequestUser(req) }, req.user?.id);
   res.status(201).json(item);
 });
 
@@ -866,6 +982,7 @@ app.patch('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => {
   if (!item) return res.status(404).json({ error: 'Item not found' });
   const boardId = db.getCardBoardId(item.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_updated' });
+  sendPushToCardWatchers(item.card_id, 'checklist_item_updated', { user: checkedBy }, req.user?.id);
   res.json(item);
 });
 
@@ -900,6 +1017,9 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRat
   if (!comment) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created', cardId: id, user: author });
+  // Auto-watch card when commenting
+  if (req.user) db.watchCard(id, req.user.id);
+  sendPushToCardWatchers(id, 'comment_added', { user: author }, req.user?.id);
   res.status(201).json(comment);
 });
 
@@ -1076,6 +1196,7 @@ app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, mutation
   if (!att) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_created' });
+  sendPushToCardWatchers(id, 'file_uploaded', { user: getRequestUser(req) }, req.user?.id);
   res.status(201).json(att);
 });
 
@@ -1109,8 +1230,11 @@ app.post('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, (r
   const userId = validId(req.params.userId);
   if (!cardId || !userId) return res.status(400).json({ error: 'Invalid ID' });
   db.assignCard(cardId, userId);
+  // Auto-watch card when assigned
+  db.watchCard(cardId, userId);
   const boardId = db.getCardBoardId(cardId);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_assigned' });
+  sendPushToCardWatchers(cardId, 'card_assigned', { user: getRequestUser(req) }, req.user?.id);
   res.json({ ok: true });
 });
 
