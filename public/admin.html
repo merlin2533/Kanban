@@ -7,7 +7,11 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -234,6 +238,25 @@
 
     /* Empty state */
     .empty-state { color: #94a3b8; font-size: 13px; padding: 12px 0; }
+
+    /* Mobile responsive */
+    @media (max-width: 768px) {
+      .topnav { padding: 10px 12px; }
+      .topnav-right { gap: 4px; flex-wrap: wrap; }
+      .nav-link { padding: 5px 8px; font-size: 12px; }
+      .btn-logout { padding: 5px 8px; font-size: 12px; }
+      .main { padding: 16px 12px; }
+      .page-header h1 { font-size: 20px; }
+      .tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+      .tab { padding: 8px 14px; font-size: 13px; white-space: nowrap; }
+      .admin-card { padding: 16px; }
+      .user-row { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .user-boards { padding: 0; min-width: auto; }
+      .form-row { flex-direction: column; }
+      .form-input { min-width: auto; width: 100%; }
+      .board-access-header { flex-direction: column; align-items: flex-start; gap: 8px; }
+      .board-download-item { flex-direction: column; align-items: flex-start; gap: 8px; }
+    }
 
     /* Dark mode */
     @media (prefers-color-scheme: dark) {
@@ -1165,5 +1188,6 @@
 
     init();
   </script>
+  <script src="/pwa-install.js"></script>
 </body>
 </html>

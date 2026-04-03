@@ -7,7 +7,11 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <meta name="description" content="Kanban Board Login">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -57,6 +61,11 @@
     }
     button:hover { background: #1d4ed8; }
     .error { color: #dc2626; font-size: 13px; margin-top: 12px; display: none; }
+    @media (max-width: 480px) {
+      .container { padding: 32px 24px; width: 95%; }
+      .logo { font-size: 36px; }
+      h1 { font-size: 20px; }
+    }
     @media (prefers-color-scheme: dark) {
       body { background: #0f172a; }
       .container { background: #1e293b; }
@@ -147,5 +156,6 @@
       }
     });
   </script>
+  <script src="/pwa-install.js"></script>
 </body>
 </html>

@@ -1329,6 +1329,83 @@ function setupEvents() {
 
 // showSuccess is defined above via showToast
 
+// --- Watch Card ---
+let isWatching = false;
+
+async function loadWatchStatus() {
+  if (!currentUser) return;
+  try {
+    const data = await api(`/api/cards/${cardId}/watching`);
+    isWatching = data.watching;
+    updateWatchButton();
+  } catch {}
+}
+
+function updateWatchButton() {
+  const btn = document.getElementById('watchCardBtn');
+  const icon = document.getElementById('watchIcon');
+  if (!btn) return;
+  if (!currentUser) { btn.style.display = 'none'; return; }
+  btn.style.display = '';
+  if (isWatching) {
+    icon.textContent = '\uD83D\uDD14'; // bell
+    btn.title = 'Beobachtung beenden';
+    btn.classList.add('watching');
+  } else {
+    icon.textContent = '\uD83D\uDC41'; // eye
+    btn.title = 'Karte beobachten';
+    btn.classList.remove('watching');
+  }
+}
+
+async function toggleWatch() {
+  if (!currentUser) return;
+  try {
+    if (isWatching) {
+      await api(`/api/cards/${cardId}/watch`, 'DELETE');
+      isWatching = false;
+    } else {
+      await api(`/api/cards/${cardId}/watch`, 'POST');
+      isWatching = true;
+      // Ensure push subscription is active when watching
+      await ensurePushSubscription();
+    }
+    updateWatchButton();
+  } catch (e) {
+    showError(e.message);
+  }
+}
+
+// --- Push Subscription ---
+async function ensurePushSubscription() {
+  if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (sub) return; // already subscribed
+    const res = await fetch('/api/push/vapid-key');
+    const { publicKey } = await res.json();
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey)
+    });
+    await api('/api/push/subscribe', 'POST', sub.toJSON());
+  } catch (err) {
+    console.warn('Push subscription failed:', err);
+  }
+}
+
+function urlBase64ToUint8Array(base64String) {
+  var padding = '='.repeat((4 - base64String.length % 4) % 4);
+  var base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+  var rawData = atob(base64);
+  var outputArray = new Uint8Array(rawData.length);
+  for (var i = 0; i < rawData.length; ++i) {
+    outputArray[i] = rawData.charCodeAt(i);
+  }
+  return outputArray;
+}
+
 // --- Init ---
 if (!boardId || !cardId) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -1346,5 +1423,9 @@ if (!boardId || !cardId) {
     await loadCard();
     setupSSE();
     setupNotificationCheck();
+    // Watch button
+    loadWatchStatus();
+    const watchBtn = document.getElementById('watchCardBtn');
+    if (watchBtn) watchBtn.addEventListener('click', toggleWatch);
   });
 }

@@ -8,15 +8,20 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
 </head>
 <body>
   <header>
     <a id="backLink" href="/" class="home-link back-link" aria-label="Zurück zum Board">&#8592;</a>
     <h1 id="boardTitle" class="card-page-board-title"></h1>
     <div class="header-actions" id="headerActions">
+      <button id="watchCardBtn" class="icon-btn watch-btn" title="Karte beobachten" aria-label="Karte beobachten">
+        <span id="watchIcon">&#128065;</span>
+      </button>
       <button id="duplicateCardBtn" class="icon-btn" title="Karte duplizieren" aria-label="Karte duplizieren">&#9112;</button>
     </div>
   </header>
@@ -204,5 +209,6 @@
   </div>
 
   <script src="/card.js"></script>
+  <script src="/pwa-install.js"></script>
 </body>
 </html>

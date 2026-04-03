@@ -7,11 +7,13 @@
   <link rel="manifest" href="/manifest.json">
   <meta name="theme-color" content="#2563eb">
   <meta name="color-scheme" content="light dark">
+  <link rel="icon" href="/icons/icon-192.png" type="image/png">
   <link rel="icon" href="/icons/icon-192.svg" type="image/svg+xml">
   <meta name="description" content="Einfaches selbst-gehostetes Kanban Board">
+  <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <link rel="apple-touch-icon" href="/icons/icon-192.svg">
+  <link rel="apple-touch-icon" href="/icons/icon-192.png">
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
     body {
@@ -235,6 +237,22 @@
       font-weight: 600;
     }
     .btn-small:hover { background: #1d4ed8; }
+
+    /* Mobile responsive */
+    @media (max-width: 768px) {
+      .topnav { padding: 10px 12px; }
+      .topnav-right { gap: 4px; flex-wrap: wrap; }
+      .nav-link { padding: 5px 8px; font-size: 12px; }
+      .btn-logout { padding: 5px 8px; font-size: 12px; }
+      .main { padding: 16px 12px; }
+      .page-header h1 { font-size: 20px; }
+      .page-header p { font-size: 13px; }
+      .create-bar { flex-direction: column; }
+      .create-bar button { width: 100%; }
+      .board-grid { grid-template-columns: 1fr; gap: 12px; }
+      .board-card { padding: 16px; }
+      .template-card { padding: 12px 14px; flex-wrap: wrap; }
+    }
 
     /* Dark mode */
     @media (prefers-color-scheme: dark) {
@@ -527,5 +545,6 @@
       navigator.serviceWorker.register('/sw.js').catch(err => console.error('SW:', err));
     }
   </script>
+  <script src="/pwa-install.js"></script>
 </body>
 </html>
