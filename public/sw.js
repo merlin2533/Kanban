@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kanban-v4';
+const CACHE_NAME = 'kanban-v5';
 const STATIC_ASSETS = [
   '/',
   '/board.html',
@@ -9,7 +9,12 @@ const STATIC_ASSETS = [
   '/style.css',
   '/app.js',
   '/card.js',
+  '/pwa-install.js',
   '/manifest.json',
+  '/icons/icon-192.png',
+  '/icons/icon-512.png',
+  '/icons/icon-192-maskable.png',
+  '/icons/icon-512-maskable.png',
   '/icons/icon-192.svg',
   '/icons/icon-512.svg'
 ];
