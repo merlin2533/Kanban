@@ -5,6 +5,7 @@ const fs = require('fs');
 const http = require('http');
 const https = require('https');
 const db = require('./db');
+const email = require('./email');
 
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -763,12 +764,31 @@ app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
   if (!Number.isInteger(columnId) || columnId <= 0) return res.status(400).json({ error: 'columnId must be a positive integer' });
   const position = Number(req.body.position);
   if (!Number.isInteger(position) || position < 0) return res.status(400).json({ error: 'position must be a non-negative integer' });
+  // Capture source column title before the move
+  const cardBefore = db.getDb().prepare('SELECT id, text, column_id FROM cards WHERE id = ?').get(id);
+  const fromColTitle = cardBefore
+    ? (db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(cardBefore.column_id) || {}).title
+    : null;
   const card = db.moveCard(id, columnId, position);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   // After move, card.column_id is the target column; look up boardId from there
   const boardId = db.getColumnBoardId(card.column_id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_moved', cardId: id, user });
+  // Email notification to assignees (only when column actually changed)
+  if (cardBefore && cardBefore.column_id !== columnId) {
+    const toCol = db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(columnId);
+    const assignees = db.getCardAssignees(id);
+    if (assignees.length > 0 && toCol) {
+      email.notifyCardMoved({
+        card: { id, text: card.text },
+        fromColumn: fromColTitle,
+        toColumn: toCol.title,
+        byUsername: user,
+        assigneeIds: assignees.map(a => a.id),
+      }).catch(err => console.error('[EMAIL] notifyCardMoved error:', err));
+    }
+  }
   res.json(card);
 });
 
@@ -900,6 +920,16 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRat
   if (!comment) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created', cardId: id, user: author });
+  // Email notification to all assignees
+  const card = db.getDb().prepare('SELECT id, text FROM cards WHERE id = ?').get(id);
+  if (card) {
+    const assignees = db.getCardAssignees(id);
+    email.notifyCommentAdded({
+      card,
+      comment: { text, author },
+      assigneeIds: assignees.map(a => a.id),
+    }).catch(err => console.error('[EMAIL] notifyCommentAdded error:', err));
+  }
   res.status(201).json(comment);
 });
 
@@ -1111,6 +1141,15 @@ app.post('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, (r
   db.assignCard(cardId, userId);
   const boardId = db.getCardBoardId(cardId);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_assigned' });
+  // Email notification
+  const card = db.getDb().prepare('SELECT id, text FROM cards WHERE id = ?').get(cardId);
+  if (card) {
+    email.notifyCardAssigned({
+      assignedUserId: userId,
+      card,
+      byUsername: getRequestUser(req),
+    }).catch(err => console.error('[EMAIL] notifyCardAssigned error:', err));
+  }
   res.json({ ok: true });
 });
 
@@ -1331,6 +1370,67 @@ app.post('/api/external/tickets', apiKeyAuth, (req, res) => {
   const card = db.createCard(column.id, title, description);
   res.status(201).json({ ok: true, card });
 });
+
+// --- User email management ---
+// GET /api/me  – already handled; here we add a PATCH for updating the email field
+app.patch('/api/me/email', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const { email: emailAddr } = req.body || {};
+  if (emailAddr !== null && emailAddr !== '' && typeof emailAddr === 'string') {
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    db.setUserEmail(req.user.id, emailAddr);
+  } else {
+    db.setUserEmail(req.user.id, null);
+  }
+  res.json({ ok: true });
+});
+
+// GET /api/me/profile – returns current user profile including email
+app.get('/api/me/profile', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const user = db.getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ id: user.id, username: user.username, email: user.email || null, is_admin: user.is_admin });
+});
+
+// Admin: update any user's email
+app.patch('/api/admin/users/:id/email', authMiddleware, requireAdmin, (req, res) => {
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const { email: emailAddr } = req.body || {};
+  if (emailAddr && typeof emailAddr === 'string' && emailAddr.trim()) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr.trim())) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    db.setUserEmail(id, emailAddr.trim());
+  } else {
+    db.setUserEmail(id, null);
+  }
+  res.json({ ok: true });
+});
+
+// --- Due-date reminder job ---
+function runDueDateReminders() {
+  try {
+    const intervalHours = parseFloat(db.getSetting('reminder_interval_hours') || '24');
+    if (!intervalHours || isNaN(intervalHours) || intervalHours <= 0) return;
+    const rows = db.getCardsDueSoon(intervalHours);
+    if (rows.length > 0) {
+      console.log(`[REMINDER] Checking due dates – ${rows.length} assignment(s) within ${intervalHours}h`);
+      email.notifyDueSoon(rows).catch(err => console.error('[REMINDER] Error sending reminders:', err));
+    }
+  } catch (err) {
+    console.error('[REMINDER] Job error:', err);
+  }
+}
+
+// Run once on startup (after a short delay) then on a regular interval
+setTimeout(runDueDateReminders, 30 * 1000);
+const REMINDER_POLL_MS = 60 * 60 * 1000; // check every hour regardless of reminder_interval_hours
+setInterval(runDueDateReminders, REMINDER_POLL_MS);
 
 // --- Global error handler ---
 app.use((err, req, res, next) => {

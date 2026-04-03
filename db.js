@@ -285,6 +285,13 @@ try {
   db.exec("ALTER TABLE board_members ADD COLUMN role TEXT DEFAULT 'editor'");
 }
 
+// Migration: add email column to users if missing
+try {
+  db.prepare("SELECT email FROM users LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE users ADD COLUMN email TEXT DEFAULT NULL");
+}
+
 // Migration: add public_access column to boards
 try {
   db.prepare("SELECT public_access FROM boards LIMIT 1").get();
@@ -474,6 +481,14 @@ function removeBoardMember(boardId, userId) {
 
 function getUsers() {
   return db.prepare('SELECT id, username, is_admin, password_changed_at, created_at FROM users').all();
+}
+
+function getUserById(id) {
+  return db.prepare('SELECT id, username, is_admin, email, created_at FROM users WHERE id = ?').get(id) || null;
+}
+
+function setUserEmail(userId, email) {
+  db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email || null, userId);
 }
 
 function deleteUser(id) {
@@ -1343,11 +1358,34 @@ function getBlockedCardIds(boardId) {
   `).all(boardId).map(r => r.id);
 }
 
+// --- Due-date reminder helpers ---
+
+function getCardsDueSoon(withinHours) {
+  // Returns non-archived cards with a due_date within the next `withinHours` hours
+  // that also have at least one assignee.
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + withinHours * 60 * 60 * 1000);
+  const nowIso = now.toISOString().slice(0, 19).replace('T', ' ');
+  const cutoffIso = cutoff.toISOString().slice(0, 19).replace('T', ' ');
+  return db.prepare(`
+    SELECT c.id, c.text, c.due_date, col.board_id,
+           u.id AS user_id, u.username, u.email
+    FROM cards c
+    JOIN columns col ON col.id = c.column_id
+    JOIN card_assignees ca ON ca.card_id = c.id
+    JOIN users u ON u.id = ca.user_id
+    WHERE c.archived = 0
+      AND c.due_date IS NOT NULL
+      AND datetime(c.due_date) > datetime(?)
+      AND datetime(c.due_date) <= datetime(?)
+  `).all(nowIso, cutoffIso);
+}
+
 // --- Notification Preferences ---
 
 const NOTIFICATION_EVENT_TYPES = [
   'card_created', 'card_assigned', 'card_due_soon',
-  'comment_added', 'card_archived', 'board_updated'
+  'comment_added', 'card_archived', 'board_updated', 'card_moved'
 ];
 
 function getNotificationPrefs(userId) {
@@ -1404,7 +1442,7 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, deleteUser,
+  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, getUserById, setUserEmail, deleteUser,
   // Board members
   getBoardMembers, isBoardMember, addBoardMember, removeBoardMember,
   // Webhooks
@@ -1419,6 +1457,8 @@ module.exports = {
   getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
   // Notification Preferences
   getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
+  // Due-date reminders
+  getCardsDueSoon,
   // Raw DB
   getDb,
 };
