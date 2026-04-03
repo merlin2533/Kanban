@@ -1,4 +1,4 @@
-const CACHE_NAME = 'kanban-v5';
+const CACHE_NAME = 'kanban-v6';
 const STATIC_ASSETS = [
   '/',
   '/board.html',
@@ -93,13 +93,28 @@ self.addEventListener('push', (e) => {
   e.waitUntil(
     self.registration.showNotification(data.title || 'Kanban', {
       body: data.body || 'Neue Aktivität auf deinem Board',
-      icon: '/icons/icon-192.svg',
-      badge: '/icons/icon-192.svg'
+      icon: '/icons/icon-192.png',
+      badge: '/icons/icon-192.png',
+      data: data.data || {},
+      vibrate: [200, 100, 200]
     })
   );
 });
 
 self.addEventListener('notificationclick', (e) => {
   e.notification.close();
-  e.waitUntil(self.clients.openWindow('/'));
+  const data = e.notification.data || {};
+  // Try to open the specific card if we have cardId info
+  const url = data.cardId ? '/' : '/';
+  e.waitUntil(
+    self.clients.matchAll({ type: 'window' }).then(clients => {
+      // Focus existing window if available
+      for (const client of clients) {
+        if (client.url.includes('/board/') && 'focus' in client) {
+          return client.focus();
+        }
+      }
+      return self.clients.openWindow(url);
+    })
+  );
 });

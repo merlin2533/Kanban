@@ -124,7 +124,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_board_access_board_id ON board_access_links(board_id);
   CREATE INDEX IF NOT EXISTS idx_activity_board_created ON activity_log(board_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_cards_column_pos ON cards(column_id, position);
-  CREATE INDEX IF NOT EXISTS idx_cards_board ON cards(board_id);
+  -- Note: cards.board_id does not exist; cards reference boards via columns.board_id
 
   CREATE TABLE IF NOT EXISTS card_assignees (
     card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
@@ -180,6 +180,25 @@ db.exec(`
     email_enabled INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, event_type)
   );
+
+  CREATE TABLE IF NOT EXISTS card_watchers (
+    card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT DEFAULT (datetime('now')),
+    PRIMARY KEY (card_id, user_id)
+  );
+  CREATE INDEX IF NOT EXISTS idx_card_watchers_card_id ON card_watchers(card_id);
+  CREATE INDEX IF NOT EXISTS idx_card_watchers_user_id ON card_watchers(user_id);
+
+  CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint TEXT NOT NULL UNIQUE,
+    keys_p256dh TEXT NOT NULL,
+    keys_auth TEXT NOT NULL,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+  CREATE INDEX IF NOT EXISTS idx_push_subs_user_id ON push_subscriptions(user_id);
 `);
 
 // Migration: populate board_members for existing boards/users (backward compatibility)
@@ -1366,6 +1385,50 @@ function setNotificationPref(userId, eventType, emailEnabled) {
     .run(userId, eventType, emailEnabled ? 1 : 0);
 }
 
+// --- Card Watchers ---
+
+function watchCard(cardId, userId) {
+  db.prepare('INSERT OR IGNORE INTO card_watchers (card_id, user_id) VALUES (?, ?)').run(cardId, userId);
+}
+
+function unwatchCard(cardId, userId) {
+  db.prepare('DELETE FROM card_watchers WHERE card_id = ? AND user_id = ?').run(cardId, userId);
+}
+
+function getCardWatchers(cardId) {
+  return db.prepare('SELECT u.id, u.username FROM users u JOIN card_watchers cw ON u.id = cw.user_id WHERE cw.card_id = ?').all(cardId);
+}
+
+function isWatchingCard(cardId, userId) {
+  return !!db.prepare('SELECT 1 FROM card_watchers WHERE card_id = ? AND user_id = ?').get(cardId, userId);
+}
+
+function getWatchedCardIds(userId) {
+  return db.prepare('SELECT card_id FROM card_watchers WHERE user_id = ?').all(userId).map(r => r.card_id);
+}
+
+// --- Push Subscriptions ---
+
+function savePushSubscription(userId, subscription) {
+  db.prepare(
+    'INSERT OR REPLACE INTO push_subscriptions (user_id, endpoint, keys_p256dh, keys_auth) VALUES (?, ?, ?, ?)'
+  ).run(userId, subscription.endpoint, subscription.keys.p256dh, subscription.keys.auth);
+}
+
+function removePushSubscription(endpoint) {
+  db.prepare('DELETE FROM push_subscriptions WHERE endpoint = ?').run(endpoint);
+}
+
+function getPushSubscriptionsForUser(userId) {
+  return db.prepare('SELECT * FROM push_subscriptions WHERE user_id = ?').all(userId);
+}
+
+function getPushSubscriptionsForUsers(userIds) {
+  if (!userIds.length) return [];
+  const placeholders = userIds.map(() => '?').join(',');
+  return db.prepare(`SELECT * FROM push_subscriptions WHERE user_id IN (${placeholders})`).all(...userIds);
+}
+
 // --- Raw DB access ---
 
 function getDb() { return db; }
@@ -1419,6 +1482,10 @@ module.exports = {
   getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
   // Notification Preferences
   getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
+  // Card Watchers
+  watchCard, unwatchCard, getCardWatchers, isWatchingCard, getWatchedCardIds,
+  // Push Subscriptions
+  savePushSubscription, removePushSubscription, getPushSubscriptionsForUser, getPushSubscriptionsForUsers,
   // Raw DB
   getDb,
 };
