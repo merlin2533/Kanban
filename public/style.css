@@ -2110,43 +2110,185 @@ main#board {
   line-height: 1.4;
 }
 
-/* ---- Bulk Toolbar ---- */
+/* ---- Bulk Toolbar (floating, fixed at bottom) ---- */
 .bulk-toolbar {
-  background: var(--color-primary);
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: #1e40af;
   color: #fff;
-  padding: 8px 20px;
+  padding: 12px 20px;
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 12px;
   flex-wrap: wrap;
   font-size: 13px;
   font-weight: 500;
+  z-index: 500;
+  box-shadow: 0 -4px 24px rgba(0,0,0,0.25);
+  transform: translateY(100%);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
-.bulk-action-btn {
-  background: rgba(255,255,255,0.2);
-  color: #fff;
-  border: 1px solid rgba(255,255,255,0.4);
-  border-radius: var(--radius-sm);
-  padding: 5px 12px;
-  font-size: 13px;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-.bulk-action-btn:hover:not(:disabled) { background: rgba(255,255,255,0.35); }
-.bulk-action-btn:disabled { opacity: 0.5; cursor: default; }
-.bulk-action-btn option { color: var(--color-text); background: var(--color-surface); }
 
-.card-bulk-checkbox {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-  margin-right: 4px;
-  accent-color: var(--color-primary);
+.bulk-toolbar.bulk-toolbar-visible {
+  transform: translateY(0);
+}
+
+.bulk-toolbar-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   flex-shrink: 0;
 }
 
-.card.bulk-selected { outline: 2px solid var(--color-primary); }
-#bulkSelectBtn.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
+.bulk-count-badge {
+  background: rgba(255,255,255,0.2);
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: 20px;
+  padding: 4px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.bulk-select-all-btn,
+.bulk-select-none-btn {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.3);
+  border-radius: var(--radius-sm);
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.bulk-select-all-btn:hover { background: rgba(255,255,255,0.28); }
+.bulk-select-none-btn:hover { background: rgba(255,255,255,0.28); }
+.bulk-select-none-btn:disabled { opacity: 0.4; cursor: default; }
+
+.bulk-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  flex: 1;
+}
+
+.bulk-action-select {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  max-width: 160px;
+}
+
+.bulk-action-select:hover:not(:disabled) { background: rgba(255,255,255,0.25); }
+.bulk-action-select:disabled { opacity: 0.45; cursor: default; }
+.bulk-action-select option { color: var(--color-text); background: var(--color-surface); }
+
+.bulk-action-btn {
+  background: rgba(255,255,255,0.15);
+  color: #fff;
+  border: 1px solid rgba(255,255,255,0.35);
+  border-radius: var(--radius-sm);
+  padding: 5px 14px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.bulk-action-btn:hover:not(:disabled) { background: rgba(255,255,255,0.28); }
+.bulk-action-btn:disabled { opacity: 0.45; cursor: default; }
+
+.bulk-delete-btn {
+  background: rgba(220, 38, 38, 0.5);
+  border-color: rgba(220, 38, 38, 0.7);
+}
+.bulk-delete-btn:hover:not(:disabled) {
+  background: rgba(220, 38, 38, 0.75);
+}
+
+.bulk-close-btn {
+  background: none;
+  color: rgba(255,255,255,0.7);
+  border: none;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 4px;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+.bulk-close-btn:hover { color: #fff; }
+
+/* Selected card highlighting */
+.card-bulk-checkbox {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+  margin-right: 6px;
+  accent-color: var(--color-primary);
+  flex-shrink: 0;
+  vertical-align: middle;
+}
+
+.card.bulk-selected {
+  outline: 2px solid var(--color-primary);
+  outline-offset: 1px;
+  background: #eff6ff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.12), 0 2px 8px rgba(0,0,0,0.1);
+}
+
+#bulkSelectBtn.active {
+  background: var(--color-primary);
+  color: #fff;
+  border-color: var(--color-primary);
+}
+
+/* Extra bottom padding on board when bulk toolbar is open */
+body.bulk-mode-active #board {
+  padding-bottom: 80px;
+}
+
+@media (prefers-color-scheme: dark) {
+  .card.bulk-selected {
+    background: #1e3a5f;
+    outline-color: #60a5fa;
+    box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.18), 0 2px 8px rgba(0,0,0,0.3);
+  }
+}
+
+/* Responsive bulk toolbar */
+@media (max-width: 640px) {
+  .bulk-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 8px;
+    padding: 10px 14px;
+  }
+  .bulk-toolbar-actions {
+    gap: 6px;
+  }
+  .bulk-action-select {
+    max-width: 130px;
+    font-size: 11px;
+  }
+  .bulk-close-btn {
+    position: absolute;
+    top: 10px;
+    right: 14px;
+    margin-left: 0;
+  }
+}
 
 /* ---- Search results dropdown ---- */
 .search-results-dropdown {
@@ -2240,6 +2382,15 @@ main#board {
 .notif-pref-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
 .notif-pref-label { font-size: 14px; color: #334155; }
 .notif-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; cursor: pointer; }
+
+/* --- Toast notifications --- */
+@keyframes kanban-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.kanban-toast {
+  animation: kanban-toast-in 0.2s ease-out;
+}
 .notif-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }
 
 /* Watch button */

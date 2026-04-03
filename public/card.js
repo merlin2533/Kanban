@@ -4,6 +4,32 @@ const pathParts = window.location.pathname.split('/');
 const boardId = pathParts[2];
 const cardId = Number(pathParts[4]);
 
+// --- localStorage helpers (safe for Private Browsing / quota errors) ---
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsSet(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      // Try to free space by removing stale entries, then retry once
+      try {
+        Object.keys(localStorage)
+          .filter(k => /^(kanban_priority_filter_|kanban_due_filter_|col_collapsed_)/.test(k))
+          .forEach(k => localStorage.removeItem(k));
+        localStorage.setItem(key, value);
+        return true;
+      } catch { return false; }
+    }
+    return false;
+  }
+}
+function lsRemove(key) {
+  try { localStorage.removeItem(key); } catch { /* noop */ }
+}
+
 let board = null;
 let card = null;
 let currentUser = null;
@@ -12,11 +38,11 @@ let guestName = '';
 
 // --- Auth helpers ---
 function getGuestName() {
-  return guestName || localStorage.getItem('kanban_guest_name') || '';
+  return guestName || lsGet('kanban_guest_name') || '';
 }
 function setGuestName(name) {
   guestName = name;
-  localStorage.setItem('kanban_guest_name', name);
+  lsSet('kanban_guest_name', name);
 }
 function getCurrentUsername() {
   if (currentUser) return currentUser.username;
@@ -28,7 +54,7 @@ function canEdit() {
 
 function promptGuestName() {
   return new Promise((resolve) => {
-    const stored = localStorage.getItem('kanban_guest_name');
+    const stored = lsGet('kanban_guest_name');
     if (stored) { guestName = stored; resolve(stored); return; }
     const overlay = document.getElementById('guestNameOverlay');
     const input = document.getElementById('guestNameInput');
@@ -126,14 +152,20 @@ async function api(url, method = 'GET', body = null) {
   return res.json();
 }
 
-// --- Error toast ---
-function showError(msg) {
+// --- Toast notifications ---
+function showToast(msg, type = 'error', duration = 4000) {
+  const colors = { error: '#dc2626', success: '#22c55e', info: '#2563eb' };
   const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+  toast.className = 'kanban-toast';
+  toast.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:${colors[type] || colors.error};color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);pointer-events:none;`;
   toast.textContent = msg;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), duration);
 }
+
+function showError(msg) { showToast(msg, 'error'); }
+function showSuccess(msg) { showToast(msg, 'success', 3000); }
+function showInfo(msg) { showToast(msg, 'info', 3000); }
 
 // --- Utility ---
 function stringToColor(str) {
@@ -230,7 +262,7 @@ async function loadCard() {
     try {
       const archived = await api(`/api/boards/${boardId}/archived`);
       card = archived.find(c => c.id === cardId) || null;
-    } catch {}
+    } catch (e) { console.warn('[loadCard] Archiv konnte nicht geladen werden:', e.message); }
   }
   if (!card) {
     document.querySelector('.card-page-main').innerHTML = '<p style="padding:40px;color:#94a3b8;font-size:18px;">Karte nicht gefunden.</p>';
@@ -941,8 +973,11 @@ async function withLoading(btn, fn) {
 function setupSSE() {
   let reconnectDelay = 2000;
   let es;
+  let stopped = false;
+  let reconnectTimer = null;
 
   function connect() {
+    if (stopped) return;
     const params = [];
     if (window._accessToken) params.push('token=' + window._accessToken);
     const guest = getGuestName();
@@ -962,13 +997,24 @@ function setupSSE() {
     };
 
     es.onerror = () => {
+      if (stopped) return;
       es.close();
-      setTimeout(() => { connect(); }, reconnectDelay);
+      clearTimeout(reconnectTimer);
+      reconnectTimer = setTimeout(() => { connect(); }, reconnectDelay);
       reconnectDelay = Math.min(reconnectDelay * 1.5, 30000);
     };
     es.onopen = () => { reconnectDelay = 2000; };
+    window._eventSource = es;
   }
+
   connect();
+
+  // Clean up on page unload
+  window.addEventListener('beforeunload', () => {
+    stopped = true;
+    clearTimeout(reconnectTimer);
+    if (es) { es.close(); es = null; }
+  });
 }
 
 // --- Markdown preview for description ---
@@ -1281,13 +1327,7 @@ function setupEvents() {
   });
 }
 
-function showSuccess(msg) {
-  const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#22c55e;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
-  toast.textContent = msg;
-  document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 3000);
-}
+// showSuccess is defined above via showToast
 
 // --- Watch Card ---
 let isWatching = false;

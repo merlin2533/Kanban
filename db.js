@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 
@@ -181,6 +182,21 @@ db.exec(`
     PRIMARY KEY (user_id, event_type)
   );
 
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (datetime('now')),
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action_type TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    details TEXT,
+    ip_address TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
+  CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_action_type ON audit_log(action_type);
+  CREATE INDEX IF NOT EXISTS idx_audit_target_type ON audit_log(target_type);
+
   CREATE TABLE IF NOT EXISTS card_watchers (
     card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
     user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -297,11 +313,26 @@ try {
   db.exec("ALTER TABLE cards ADD COLUMN recurrence TEXT DEFAULT NULL");
 }
 
+// Migration: add file_data BLOB column to attachments for DB-based storage
+try {
+  db.prepare("SELECT file_data FROM attachments LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE attachments ADD COLUMN file_data BLOB DEFAULT NULL");
+  console.log('[Migration] Added file_data column to attachments table');
+}
+
 // Migration: add role column to board_members
 try {
   db.prepare("SELECT role FROM board_members LIMIT 1").get();
 } catch {
   db.exec("ALTER TABLE board_members ADD COLUMN role TEXT DEFAULT 'editor'");
+}
+
+// Migration: add email column to users if missing
+try {
+  db.prepare("SELECT email FROM users LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE users ADD COLUMN email TEXT DEFAULT NULL");
 }
 
 // Migration: add public_access column to boards
@@ -495,6 +526,14 @@ function getUsers() {
   return db.prepare('SELECT id, username, is_admin, password_changed_at, created_at FROM users').all();
 }
 
+function getUserById(id) {
+  return db.prepare('SELECT id, username, is_admin, email, created_at FROM users WHERE id = ?').get(id) || null;
+}
+
+function setUserEmail(userId, email) {
+  db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email || null, userId);
+}
+
 function deleteUser(id) {
   const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
   if (user) db.prepare('DELETE FROM users WHERE id = ?').run(id);
@@ -507,6 +546,65 @@ function logActivity(boardId, action, details, cardId) {
   db.prepare('INSERT INTO activity_log (board_id, action, details, card_id) VALUES (?, ?, ?, ?)').run(
     boardId, action, JSON.stringify(details || {}), cardId || null
   );
+}
+
+// Valid audit action types
+const AUDIT_ACTION_TYPES = [
+  'user_created', 'user_deleted', 'user_role_changed',
+  'board_created', 'board_deleted',
+  'settings_changed',
+  'login_success', 'login_failed',
+  'password_changed',
+  'access_link_created', 'access_link_deleted',
+  'webhook_created', 'webhook_deleted',
+];
+
+function logAudit(userId, actionType, targetType, targetId, details, ipAddress) {
+  try {
+    db.prepare(
+      'INSERT INTO audit_log (user_id, action_type, target_type, target_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(
+      userId || null,
+      actionType,
+      targetType || null,
+      targetId != null ? String(targetId) : null,
+      details ? JSON.stringify(details) : null,
+      ipAddress || null
+    );
+  } catch (e) {
+    console.error('[AUDIT] Failed to write audit log:', e.message);
+  }
+}
+
+function getAuditLog({ limit = 50, offset = 0, actionType, userId, targetType, startDate, endDate } = {}) {
+  limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
+  offset = Math.max(0, parseInt(offset) || 0);
+
+  const conditions = [];
+  const params = [];
+
+  if (actionType) { conditions.push('a.action_type = ?'); params.push(actionType); }
+  if (userId) { conditions.push('a.user_id = ?'); params.push(userId); }
+  if (targetType) { conditions.push('a.target_type = ?'); params.push(targetType); }
+  if (startDate) { conditions.push("a.timestamp >= ?"); params.push(startDate); }
+  if (endDate) { conditions.push("a.timestamp <= ?"); params.push(endDate); }
+
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  const items = db.prepare(`
+    SELECT a.*, u.username
+    FROM audit_log a
+    LEFT JOIN users u ON a.user_id = u.id
+    ${where}
+    ORDER BY a.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
+
+  const total = db.prepare(`
+    SELECT COUNT(*) as count FROM audit_log a ${where}
+  `).get(...params).count;
+
+  return { items, total };
 }
 
 // --- Boards ---
@@ -884,20 +982,27 @@ function deleteChecklistItem(id) {
 
 // --- Attachments ---
 
-// Fix #8: store file.filename (multer-generated name) instead of file.path
+// Store file content as BLOB in the DB (memoryStorage: file.buffer is available)
 function createAttachment(cardId, file) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
   if (!card) return null;
-  const result = db.prepare('INSERT INTO attachments (card_id, filename, filepath, mimetype, size) VALUES (?, ?, ?, ?, ?)').run(
-    cardId, file.originalname, file.filename, file.mimetype, file.size
-  );
+  const result = db.prepare(
+    'INSERT INTO attachments (card_id, filename, filepath, mimetype, size, file_data) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(cardId, file.originalname, '', file.mimetype, file.size, file.buffer);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
   if (col) logActivity(col.board_id, 'file_uploaded', { cardText: card.text, filename: file.originalname });
-  return db.prepare('SELECT * FROM attachments WHERE id = ?').get(result.lastInsertRowid);
+  // Return metadata only (exclude blob from response)
+  return db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(result.lastInsertRowid);
 }
 
+// Return metadata only (no blob)
 function getAttachment(id) {
-  return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+  return db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(id);
+}
+
+// Return the raw file_data buffer for serving
+function getAttachmentData(id) {
+  return db.prepare('SELECT id, filename, mimetype, file_data FROM attachments WHERE id = ?').get(id);
 }
 
 function getCardAttachmentPaths(cardId) {
@@ -914,9 +1019,34 @@ function getBoardAttachmentPaths(boardId) {
 }
 
 function deleteAttachment(id) {
-  const att = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+  const att = db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(id);
   if (att) db.prepare('DELETE FROM attachments WHERE id = ?').run(id);
   return att;
+}
+
+// Startup migration: read any existing files from the uploads directory into the DB
+function migrateFilesystemAttachments(uploadsDir) {
+  const rows = db.prepare('SELECT id, filename, filepath FROM attachments WHERE file_data IS NULL AND filepath != ?').all('');
+  if (rows.length === 0) {
+    console.log('[Migration] No filesystem attachments to migrate.');
+    return;
+  }
+  console.log(`[Migration] Migrating ${rows.length} filesystem attachment(s) to DB...`);
+  let migrated = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const diskPath = path.join(uploadsDir, path.basename(row.filepath));
+    try {
+      const buffer = fs.readFileSync(diskPath);
+      db.prepare('UPDATE attachments SET file_data = ?, filepath = ? WHERE id = ?').run(buffer, '', row.id);
+      try { fs.unlinkSync(diskPath); } catch {}
+      migrated++;
+    } catch (e) {
+      console.warn(`[Migration] Could not migrate attachment id=${row.id} (${row.filepath}): ${e.message}`);
+      failed++;
+    }
+  }
+  console.log(`[Migration] Done: ${migrated} migrated, ${failed} failed.`);
 }
 
 // --- Labels ---
@@ -1362,11 +1492,34 @@ function getBlockedCardIds(boardId) {
   `).all(boardId).map(r => r.id);
 }
 
+// --- Due-date reminder helpers ---
+
+function getCardsDueSoon(withinHours) {
+  // Returns non-archived cards with a due_date within the next `withinHours` hours
+  // that also have at least one assignee.
+  const now = new Date();
+  const cutoff = new Date(now.getTime() + withinHours * 60 * 60 * 1000);
+  const nowIso = now.toISOString().slice(0, 19).replace('T', ' ');
+  const cutoffIso = cutoff.toISOString().slice(0, 19).replace('T', ' ');
+  return db.prepare(`
+    SELECT c.id, c.text, c.due_date, col.board_id,
+           u.id AS user_id, u.username, u.email
+    FROM cards c
+    JOIN columns col ON col.id = c.column_id
+    JOIN card_assignees ca ON ca.card_id = c.id
+    JOIN users u ON u.id = ca.user_id
+    WHERE c.archived = 0
+      AND c.due_date IS NOT NULL
+      AND datetime(c.due_date) > datetime(?)
+      AND datetime(c.due_date) <= datetime(?)
+  `).all(nowIso, cutoffIso);
+}
+
 // --- Notification Preferences ---
 
 const NOTIFICATION_EVENT_TYPES = [
   'card_created', 'card_assigned', 'card_due_soon',
-  'comment_added', 'card_archived', 'board_updated'
+  'comment_added', 'card_archived', 'board_updated', 'card_moved'
 ];
 
 function getNotificationPrefs(userId) {
@@ -1444,7 +1597,8 @@ module.exports = {
   // Checklist
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   // Attachments
-  createAttachment, getAttachment, deleteAttachment, getCardAttachmentPaths, getBoardAttachmentPaths,
+  createAttachment, getAttachment, getAttachmentData, deleteAttachment,
+  getCardAttachmentPaths, getBoardAttachmentPaths, migrateFilesystemAttachments,
   // Labels
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
   // Card Assignees
@@ -1467,7 +1621,7 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, deleteUser,
+  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, getUserById, setUserEmail, deleteUser,
   // Board members
   getBoardMembers, isBoardMember, addBoardMember, removeBoardMember,
   // Webhooks
@@ -1482,6 +1636,10 @@ module.exports = {
   getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
   // Notification Preferences
   getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
+  // Due-date reminders
+  getCardsDueSoon,
+  // Audit Log
+  logAudit, getAuditLog, AUDIT_ACTION_TYPES,
   // Card Watchers
   watchCard, unwatchCard, getCardWatchers, isWatchingCard, getWatchedCardIds,
   // Push Subscriptions

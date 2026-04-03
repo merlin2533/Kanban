@@ -4,9 +4,51 @@ let board = null;
 let currentCardId = null;
 const modifiedCards = new Set();
 
+// --- localStorage helpers (safe for Private Browsing / quota errors) ---
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsSet(key, value) {
+  try {
+    // Quick quota probe: try writing, catch QuotaExceededError
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      lsCleanup();
+      try { localStorage.setItem(key, value); return true; } catch { return false; }
+    }
+    return false;
+  }
+}
+function lsRemove(key) {
+  try { localStorage.removeItem(key); } catch { /* noop */ }
+}
+// Remove stale board-specific filter/activity keys older than 90 days
+function lsCleanup() {
+  try {
+    const now = Date.now();
+    const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+    const stalePatterns = [/^kanban_priority_filter_/, /^kanban_due_filter_/, /^lastVisit_/, /^col_collapsed_/];
+    const keys = Object.keys(localStorage);
+    for (const k of keys) {
+      if (!stalePatterns.some(p => p.test(k))) continue;
+      // For lastVisit_ keys, check the stored date; for others just remove all to free space
+      if (k.startsWith('lastVisit_')) {
+        const val = localStorage.getItem(k);
+        if (val && (now - new Date(val).getTime()) > ninetyDays) {
+          localStorage.removeItem(k);
+        }
+      } else {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch { /* noop */ }
+}
+
 // --- Advanced Filter State ---
-let activePriorityFilter = localStorage.getItem('kanban_priority_filter_' + boardId) || null;
-let activeDueFilter = localStorage.getItem('kanban_due_filter_' + boardId) || null;
+let activePriorityFilter = lsGet('kanban_priority_filter_' + boardId) || null;
+let activeDueFilter = lsGet('kanban_due_filter_' + boardId) || null;
 
 // --- Undo Stack ---
 const undoStack = [];
@@ -44,12 +86,12 @@ let guestName = ''; // For access-link users
 let _accessTokenBoardId = null;
 
 function getGuestName() {
-  return guestName || localStorage.getItem('kanban_guest_name') || '';
+  return guestName || lsGet('kanban_guest_name') || '';
 }
 
 function setGuestName(name) {
   guestName = name;
-  localStorage.setItem('kanban_guest_name', name);
+  lsSet('kanban_guest_name', name);
 }
 
 function getCurrentUsername() {
@@ -60,7 +102,7 @@ function getCurrentUsername() {
 // Show guest name dialog and return a promise
 function promptGuestName() {
   return new Promise((resolve) => {
-    const stored = localStorage.getItem('kanban_guest_name');
+    const stored = lsGet('kanban_guest_name');
     if (stored) {
       guestName = stored;
       resolve(stored);
@@ -219,7 +261,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `/api/boards/${boardId}/events` + (params.length ? '?' + params.join('&') : '');
   }
 
+  // Track whether SSE was intentionally stopped (e.g. page unload)
+  let _sseStopped = false;
+  let _sseReconnectTimer = null;
+
   function setupSSE() {
+    if (_sseStopped) return;
     let sseErrorCount = 0;
     let reconnectDelay = 2000;
     const MAX_RECONNECT_DELAY = 30000;
@@ -248,9 +295,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     es.onerror = () => {
+      if (_sseStopped) return;
       sseErrorCount++;
       console.warn('[SSE] error count:', sseErrorCount, 'next retry in', reconnectDelay + 'ms');
       es.close();
+
+      function scheduleReconnect() {
+        clearTimeout(_sseReconnectTimer);
+        _sseReconnectTimer = setTimeout(() => {
+          console.log('[SSE] reconnecting...');
+          es = null;
+          setupSSE();
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
+      }
 
       if (sseErrorCount >= 5) {
         // Check if session is still valid before reconnecting
@@ -264,15 +322,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         scheduleReconnect();
       }
-
-      function scheduleReconnect() {
-        setTimeout(() => {
-          console.log('[SSE] reconnecting...');
-          es = null;
-          setupSSE();
-        }, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
-      }
     };
 
     es.onopen = () => {
@@ -283,6 +332,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     window._eventSource = es;
   }
+
+  // Clean up SSE and pending timers on page unload
+  window.addEventListener('beforeunload', () => {
+    _sseStopped = true;
+    clearTimeout(_sseReconnectTimer);
+    clearTimeout(sseDebounceTimer);
+    if (window._eventSource) { window._eventSource.close(); window._eventSource = null; }
+  });
 
   setupSSE();
 
@@ -374,7 +431,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try {
         const results = await api(`/api/boards/${boardId}/search?q=${encodeURIComponent(query)}`);
         showSearchResults(results);
-      } catch {}
+      } catch (e) { console.warn('[Search] Fehler:', e.message); }
     }, 300);
   };
 
@@ -461,8 +518,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         filterBtn.classList.remove('filter-active');
       }
     }
-    localStorage.setItem('kanban_priority_filter_' + boardId, activePriorityFilter || '');
-    localStorage.setItem('kanban_due_filter_' + boardId, activeDueFilter || '');
+    lsSet('kanban_priority_filter_' + boardId, activePriorityFilter || '');
+    lsSet('kanban_due_filter_' + boardId, activeDueFilter || '');
   }
 
   // Advanced filter panel
@@ -541,8 +598,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('clearAllFiltersBtn').onclick = () => {
     activePriorityFilter = null;
     activeDueFilter = null;
-    localStorage.removeItem('kanban_priority_filter_' + boardId);
-    localStorage.removeItem('kanban_due_filter_' + boardId);
+    lsRemove('kanban_priority_filter_' + boardId);
+    lsRemove('kanban_due_filter_' + boardId);
     labelFilter.value = '';
     document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
     document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
@@ -684,73 +741,220 @@ document.addEventListener('DOMContentLoaded', async () => {
   const bulkBtn = document.createElement('button');
   bulkBtn.className = 'icon-btn';
   bulkBtn.innerHTML = '&#9745;'; // checkbox icon
-  bulkBtn.title = 'Mehrfachauswahl';
+  bulkBtn.title = 'Mehrfachauswahl (Ctrl+M)';
   bulkBtn.id = 'bulkSelectBtn';
   if (!canEdit()) bulkBtn.style.display = 'none';
   bulkBtn.onclick = () => toggleBulkMode();
   document.querySelector('.header-actions').insertBefore(bulkBtn, document.getElementById('activityBtn'));
 
-  // Bulk toolbar (hidden by default)
+  // Floating bulk toolbar at the bottom of the screen
   const bulkToolbar = document.createElement('div');
   bulkToolbar.className = 'bulk-toolbar hidden';
   bulkToolbar.id = 'bulkToolbar';
+  bulkToolbar.setAttribute('role', 'toolbar');
+  bulkToolbar.setAttribute('aria-label', 'Mehrfachauswahl-Aktionen');
   bulkToolbar.innerHTML = `
-    <span id="bulkCount">0 ausgewählt</span>
-    <button class="bulk-action-btn" id="bulkArchiveBtn">Archivieren</button>
-    <button class="bulk-action-btn" id="bulkDeleteBtn" style="color:#dc2626">Löschen</button>
-    <select class="bulk-action-btn" id="bulkMoveSelect"><option value="">In Spalte verschieben...</option></select>
-    <button class="bulk-action-btn" id="bulkCancelBtn">Abbrechen</button>
+    <div class="bulk-toolbar-left">
+      <span class="bulk-count-badge" id="bulkCount">0 ausgewählt</span>
+      <button class="bulk-select-all-btn" id="bulkSelectAllBtn" title="Alle sichtbaren Karten auswählen">Alle</button>
+      <button class="bulk-select-none-btn" id="bulkSelectNoneBtn" title="Auswahl aufheben">Keine</button>
+    </div>
+    <div class="bulk-toolbar-actions">
+      <select class="bulk-action-select" id="bulkMoveSelect" aria-label="In Spalte verschieben">
+        <option value="">&#8594; Spalte...</option>
+      </select>
+      <select class="bulk-action-select" id="bulkLabelSelect" aria-label="Label zuweisen">
+        <option value="">&#127991; Label...</option>
+      </select>
+      <select class="bulk-action-select" id="bulkPrioritySelect" aria-label="Priorität setzen">
+        <option value="">&#9650; Priorität...</option>
+        <option value="none">Keine</option>
+        <option value="low">Niedrig</option>
+        <option value="medium">Mittel</option>
+        <option value="high">Hoch</option>
+      </select>
+      <button class="bulk-action-btn bulk-archive-btn" id="bulkArchiveBtn" title="Ausgewählte Karten archivieren">&#128451; Archivieren</button>
+      <button class="bulk-action-btn bulk-delete-btn" id="bulkDeleteBtn" title="Ausgewählte Karten löschen">&#128465; Löschen</button>
+    </div>
+    <button class="bulk-close-btn" id="bulkCancelBtn" title="Mehrfachauswahl beenden" aria-label="Mehrfachauswahl beenden">&times;</button>
   `;
-  document.querySelector('header').appendChild(bulkToolbar);
+  document.body.appendChild(bulkToolbar);
 
   function toggleBulkMode(on) {
     bulkMode = on !== undefined ? on : !bulkMode;
     selectedCards.clear();
     bulkBtn.classList.toggle('active', bulkMode);
-    bulkToolbar.classList.toggle('hidden', !bulkMode);
+    document.body.classList.toggle('bulk-mode-active', bulkMode);
+    if (bulkMode) {
+      bulkToolbar.classList.remove('hidden');
+      // Trigger slide-in on next frame so CSS transition fires
+      requestAnimationFrame(() => bulkToolbar.classList.add('bulk-toolbar-visible'));
+      updateBulkToolbarData();
+    } else {
+      bulkToolbar.classList.remove('bulk-toolbar-visible');
+      // Wait for slide-out transition before hiding
+      bulkToolbar.addEventListener('transitionend', () => {
+        if (!bulkMode) bulkToolbar.classList.add('hidden');
+      }, { once: true });
+    }
     updateBulkCount();
     renderBoard(); // Re-render to show/hide checkboxes
   }
 
   function updateBulkCount() {
     const el = document.getElementById('bulkCount');
-    if (el) el.textContent = selectedCards.size + ' ausgewählt';
+    const n = selectedCards.size;
+    if (el) el.textContent = n === 1 ? '1 ausgewählt' : `${n} ausgewählt`;
     const archBtn = document.getElementById('bulkArchiveBtn');
     const delBtn = document.getElementById('bulkDeleteBtn');
     const moveSel = document.getElementById('bulkMoveSelect');
-    const disabled = selectedCards.size === 0;
+    const labelSel = document.getElementById('bulkLabelSelect');
+    const priSel = document.getElementById('bulkPrioritySelect');
+    const selectNoneBtn = document.getElementById('bulkSelectNoneBtn');
+    const disabled = n === 0;
     if (archBtn) archBtn.disabled = disabled;
     if (delBtn) delBtn.disabled = disabled;
     if (moveSel) moveSel.disabled = disabled;
+    if (labelSel) labelSel.disabled = disabled;
+    if (priSel) priSel.disabled = disabled;
+    if (selectNoneBtn) selectNoneBtn.disabled = disabled;
+    // Visually highlight/un-highlight cards
+    document.querySelectorAll('.card').forEach(cardEl => {
+      const id = Number(cardEl.dataset.cardId);
+      cardEl.classList.toggle('bulk-selected', selectedCards.has(id));
+    });
   }
+
+  function updateBulkToolbarData() {
+    // Populate move select from current board columns
+    const moveSel = document.getElementById('bulkMoveSelect');
+    if (moveSel && board) {
+      moveSel.innerHTML = '<option value="">&#8594; Spalte...</option>';
+      for (const col of board.columns) {
+        const opt = document.createElement('option');
+        opt.value = col.id;
+        opt.textContent = col.title;
+        moveSel.appendChild(opt);
+      }
+    }
+    // Populate label select from board labels
+    const labelSel = document.getElementById('bulkLabelSelect');
+    if (labelSel && board && board.labels) {
+      labelSel.innerHTML = '<option value="">&#127991; Label...</option>';
+      for (const label of board.labels) {
+        const opt = document.createElement('option');
+        opt.value = label.id;
+        opt.textContent = label.name;
+        labelSel.appendChild(opt);
+      }
+    }
+  }
+
+  document.getElementById('bulkSelectAllBtn').onclick = () => {
+    document.querySelectorAll('.card').forEach(cardEl => {
+      if (cardEl.style.display !== 'none') {
+        selectedCards.add(Number(cardEl.dataset.cardId));
+        const cb = cardEl.querySelector('.card-bulk-checkbox');
+        if (cb) cb.checked = true;
+      }
+    });
+    updateBulkCount();
+  };
+
+  document.getElementById('bulkSelectNoneBtn').onclick = () => {
+    selectedCards.clear();
+    document.querySelectorAll('.card-bulk-checkbox').forEach(cb => { cb.checked = false; });
+    updateBulkCount();
+  };
 
   document.getElementById('bulkArchiveBtn').onclick = async () => {
     if (!selectedCards.size) return;
+    const btn = document.getElementById('bulkArchiveBtn');
+    btn.disabled = true;
+    btn.textContent = '...';
     try {
-      await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'archive', cardIds: [...selectedCards] });
+      const result = await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'archive', cardIds: [...selectedCards] });
+      showBulkSuccess(`${result.count} Karte(n) archiviert`);
       toggleBulkMode(false);
       loadBoard();
-    } catch (e) { showError(e.message); }
+    } catch (e) {
+      showError(e.message);
+      btn.disabled = false;
+      btn.innerHTML = '&#128451; Archivieren';
+    }
   };
 
   document.getElementById('bulkDeleteBtn').onclick = async () => {
-    if (!selectedCards.size || !confirm(`${selectedCards.size} Karten löschen?`)) return;
+    if (!selectedCards.size || !confirm(`${selectedCards.size} Karte(n) unwiderruflich löschen?`)) return;
+    const btn = document.getElementById('bulkDeleteBtn');
+    btn.disabled = true;
+    btn.textContent = '...';
     try {
-      await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'delete', cardIds: [...selectedCards] });
+      const result = await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'delete', cardIds: [...selectedCards] });
+      showBulkSuccess(`${result.count} Karte(n) gelöscht`);
       toggleBulkMode(false);
       loadBoard();
-    } catch (e) { showError(e.message); }
+    } catch (e) {
+      showError(e.message);
+      btn.disabled = false;
+      btn.innerHTML = '&#128465; Löschen';
+    }
   };
 
   document.getElementById('bulkMoveSelect').onchange = async (e) => {
     const colId = Number(e.target.value);
     if (!colId || !selectedCards.size) { e.target.value = ''; return; }
+    const sel = e.target;
+    const colName = sel.options[sel.selectedIndex].text;
+    sel.disabled = true;
     try {
-      await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'move', cardIds: [...selectedCards], columnId: colId });
+      const result = await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'move', cardIds: [...selectedCards], columnId: colId });
+      showBulkSuccess(`${result.count} Karte(n) nach "${colName}" verschoben`);
       toggleBulkMode(false);
       loadBoard();
-    } catch (err) { showError(err.message); }
-    e.target.value = '';
+    } catch (err) {
+      showError(err.message);
+      sel.disabled = false;
+    }
+    sel.value = '';
+  };
+
+  document.getElementById('bulkLabelSelect').onchange = async (e) => {
+    const labelId = Number(e.target.value);
+    if (!labelId || !selectedCards.size) { e.target.value = ''; return; }
+    const sel = e.target;
+    const labelName = sel.options[sel.selectedIndex].text;
+    sel.disabled = true;
+    try {
+      const result = await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'label', cardIds: [...selectedCards], labelId });
+      showBulkSuccess(`Label "${labelName}" für ${result.count} Karte(n) gesetzt`);
+      toggleBulkMode(false);
+      loadBoard();
+    } catch (err) {
+      showError(err.message);
+      sel.disabled = false;
+    }
+    sel.value = '';
+  };
+
+  document.getElementById('bulkPrioritySelect').onchange = async (e) => {
+    const sel = e.target;
+    if (!sel.value) return; // placeholder selected
+    if (!selectedCards.size) { sel.value = ''; return; }
+    const rawPriority = sel.value; // 'none', 'low', 'medium', 'high'
+    const priority = rawPriority === 'none' ? null : rawPriority;
+    const labelMap = { none: 'Keine', low: 'Niedrig', medium: 'Mittel', high: 'Hoch' };
+    sel.disabled = true;
+    try {
+      const result = await api(`/api/boards/${boardId}/bulk`, 'POST', { action: 'priority', cardIds: [...selectedCards], priority });
+      showBulkSuccess(`Priorität "${labelMap[rawPriority]}" für ${result.count} Karte(n) gesetzt`);
+      toggleBulkMode(false);
+      loadBoard();
+    } catch (err) {
+      showError(err.message);
+      sel.disabled = false;
+    }
+    sel.value = '';
   };
 
   document.getElementById('bulkCancelBtn').onclick = () => toggleBulkMode(false);
@@ -760,15 +964,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   window._selectedCards = selectedCards;
   window._updateBulkCount = updateBulkCount;
   window._updateBulkMoveColumns = () => {
-    const sel = document.getElementById('bulkMoveSelect');
-    if (!sel || !board) return;
-    sel.innerHTML = '<option value="">In Spalte verschieben...</option>';
-    for (const col of board.columns) {
-      const opt = document.createElement('option');
-      opt.value = col.id;
-      opt.textContent = col.title;
-      sel.appendChild(opt);
-    }
+    updateBulkToolbarData();
   };
 
   // Keyboard shortcuts
@@ -789,6 +985,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       if (permPanel && !permPanel.classList.contains('hidden')) { permPanel.classList.add('hidden'); e.preventDefault(); return; }
       const membersPanel = document.getElementById('membersPanel');
       if (membersPanel && !membersPanel.classList.contains('hidden')) { membersPanel.classList.add('hidden'); e.preventDefault(); return; }
+      if (bulkMode) { toggleBulkMode(false); e.preventDefault(); return; }
       return;
     }
 
@@ -813,6 +1010,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
       e.preventDefault();
       performUndo();
+    }
+    if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
+      if (canEdit()) {
+        e.preventDefault();
+        toggleBulkMode();
+      }
     }
     if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && !e.ctrlKey && !e.metaKey) {
       const focused = document.activeElement;
@@ -873,14 +1076,21 @@ async function api(url, method = 'GET', body = null) {
   return res.json();
 }
 
-// --- Error Toast ---
-function showError(msg) {
+// --- Toast notifications ---
+function showToast(msg, type = 'error', duration = 4000) {
+  const colors = { error: '#dc2626', success: '#22c55e', info: '#2563eb' };
   const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+  toast.className = 'kanban-toast';
+  toast.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:${colors[type] || colors.error};color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);pointer-events:none;`;
   toast.textContent = msg;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), duration);
 }
+
+function showError(msg) { showToast(msg, 'error'); }
+function showSuccess(msg) { showToast(msg, 'success', 3000); }
+function showInfo(msg) { showToast(msg, 'info', 3000); }
+function showBulkSuccess(msg) { showToast('✓ ' + msg, 'success', 3000); }
 
 function showShortcutsHelp() {
   const existing = document.getElementById('shortcutsModal');
@@ -888,7 +1098,7 @@ function showShortcutsHelp() {
   const modal = document.createElement('div');
   modal.id = 'shortcutsModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
-  modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.2);"><h3 style="margin:0 0 16px;font-size:16px;">Tastaturkürzel</h3><table style="border-collapse:collapse;font-size:14px;"><tr><td style="padding:4px 16px 4px 0;"><kbd>n</kbd></td><td>Neue Karte</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>f</kbd></td><td>Suche</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+Z</kbd></td><td>Rückgängig</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Esc</kbd></td><td>Schließen</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>?</kbd></td><td>Diese Hilfe</td></tr></table><button onclick="document.getElementById(\'shortcutsModal\').remove()" style="margin-top:16px;padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Schließen</button></div>';
+  modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.2);"><h3 style="margin:0 0 16px;font-size:16px;">Tastaturkürzel</h3><table style="border-collapse:collapse;font-size:14px;"><tr><td style="padding:4px 16px 4px 0;"><kbd>n</kbd></td><td>Neue Karte</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>f</kbd></td><td>Suche</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+Z</kbd></td><td>Rückgängig</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+M</kbd></td><td>Mehrfachauswahl</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Esc</kbd></td><td>Schließen</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>?</kbd></td><td>Diese Hilfe</td></tr></table><button onclick="document.getElementById(\'shortcutsModal\').remove()" style="margin-top:16px;padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Schließen</button></div>';
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
   document.body.appendChild(modal);
 }
@@ -1103,7 +1313,7 @@ function createColumnEl(col) {
   collapseBtn.className = 'collapse-col-btn';
   collapseBtn.title = 'Spalte einklappen';
 
-  const isCollapsed = localStorage.getItem('col_collapsed_' + boardId + '_' + col.id) === 'true';
+  const isCollapsed = lsGet('col_collapsed_' + boardId + '_' + col.id) === 'true';
   if (isCollapsed) {
     div.classList.add('column-collapsed');
     collapseBtn.textContent = '▸';
@@ -1113,7 +1323,7 @@ function createColumnEl(col) {
 
   collapseBtn.onclick = () => {
     const collapsed = div.classList.toggle('column-collapsed');
-    localStorage.setItem('col_collapsed_' + boardId + '_' + col.id, collapsed ? 'true' : 'false');
+    lsSet('col_collapsed_' + boardId + '_' + col.id, collapsed ? 'true' : 'false');
     collapseBtn.textContent = collapsed ? '▸' : '▾';
   };
 
@@ -1236,7 +1446,7 @@ function createColumnEl(col) {
         opt.textContent = t.name;
         templateSelect.appendChild(opt);
       }
-    } catch {}
+    } catch (e) { console.warn('[Templates] Fehler:', e.message); }
   };
   templateSelect.onchange = async () => {
     const templateId = Number(templateSelect.value);
@@ -1852,7 +2062,7 @@ async function openCardModal(card) {
           }
         }
       }
-    } catch {}
+    } catch (e) { console.warn('[Assignees] Benutzerliste konnte nicht geladen werden:', e.message); }
   }
   const moveSelect = document.getElementById('moveColumnSelect');
   if (moveSelect && board) {
@@ -2286,7 +2496,7 @@ async function loadActivity(append = false) {
 
   if (!append) list.innerHTML = '';
 
-  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+  const lastVisit = lsGet('lastVisit_' + boardId);
 
   if (!append && items.length === 0) {
     list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
@@ -2323,8 +2533,8 @@ async function toggleActivity() {
   }
 
   try {
-    const lastVisit = localStorage.getItem('lastVisit_' + boardId);
-    localStorage.setItem('lastVisit_' + boardId, new Date().toISOString());
+    const lastVisit = lsGet('lastVisit_' + boardId);
+    lsSet('lastVisit_' + boardId, new Date().toISOString());
     document.getElementById('activityBadge').classList.add('hidden');
 
     await loadActivity(false);
@@ -2360,7 +2570,7 @@ function renderActivityItems(list, activities, lastVisit) {
 }
 
 async function checkNewActivity() {
-  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+  const lastVisit = lsGet('lastVisit_' + boardId);
   if (!lastVisit) return;
 
   try {
@@ -2760,7 +2970,7 @@ async function setupBoardSwitcher() {
 
     // Hide h1 when switcher is present — they both show the board name
     boardTitle.style.display = 'none';
-  } catch {}
+  } catch (e) { console.warn('[BoardSwitcher] Boards konnten nicht geladen werden:', e.message); }
 }
 
 // --- Board Members Panel ---

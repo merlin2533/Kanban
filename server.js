@@ -6,6 +6,7 @@ const http = require('http');
 const https = require('https');
 const webpush = require('web-push');
 const db = require('./db');
+const email = require('./email');
 
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -28,7 +29,7 @@ const VAPID_PRIVATE = db.getSetting('vapid_private_key');
 const VAPID_SUBJECT = process.env.VAPID_SUBJECT || 'mailto:admin@kanban.local';
 webpush.setVapidDetails(VAPID_SUBJECT, VAPID_PUBLIC, VAPID_PRIVATE);
 
-// Ensure uploads directory exists
+// Uploads directory is kept for backward-compat startup migration only
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -37,23 +38,14 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(uploadsDir));
+// /uploads static route removed – files are now served via /api/attachments/:id
 
-// --- Multer for file uploads ---
+// --- Multer for file uploads (memory storage – files stored as BLOBs in DB) ---
 const ALLOWED_MIME = new Set(['image/jpeg','image/png','image/gif','image/webp','application/pdf','text/plain']);
 const ALLOWED_EXT = new Set(['.jpg','.jpeg','.png','.gif','.webp','.pdf','.txt']);
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, 'uploads'),
-  filename: (req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, unique + ext);
-  }
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -242,6 +234,9 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
     const attempts = loginAttempts.get(ip) || [];
     attempts.push(Date.now());
     loginAttempts.set(ip, attempts);
+    // Look up user id for audit (may be null if username doesn't exist)
+    const existingUser = db.getDb().prepare('SELECT id FROM users WHERE username = ?').get(username);
+    db.logAudit(existingUser ? existingUser.id : null, 'login_failed', 'user', null, { username }, ip);
     return res.status(401).json({ error: 'Invalid credentials' });
   }
   const session = db.createSession(user.id);
@@ -250,6 +245,7 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
   const cookieStr = `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}${secure}`;
   authLog('login: SUCCESS user:', username, 'session:', session.id.substring(0, 8) + '...', 'isHttps:', isHttps, 'secure flag:', !!secure, 'NODE_ENV:', process.env.NODE_ENV);
   authLog('login: Set-Cookie:', cookieStr.replace(session.id, session.id.substring(0, 8) + '...'));
+  db.logAudit(user.id, 'login_success', 'user', user.id, { username: user.username }, ip);
   res.setHeader('Set-Cookie', cookieStr);
   const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
   res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 });
@@ -308,6 +304,8 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   const user = db.authenticateUser(req.user.username, currentPassword);
   if (!user) return res.status(401).json({ error: 'Current password incorrect' });
   db.changePassword(req.user.id, newPassword);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'password_changed', 'user', req.user.id, { username: req.user.username }, ip);
   res.json({ ok: true });
 });
 
@@ -444,7 +442,10 @@ app.post('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   const password = req.body.password;
   if (!password || password.length < 6) return res.status(400).json({ error: 'password must be at least 6 chars' });
   try {
-    const user = db.createUser(username, password, req.body.is_admin || false);
+    const isAdmin = !!(req.body.is_admin);
+    const user = db.createUser(username, password, isAdmin);
+    const ip = req.ip || req.connection.remoteAddress;
+    db.logAudit(req.user.id, 'user_created', 'user', user.id, { username, is_admin: isAdmin }, ip);
     res.status(201).json(user);
   } catch (e) {
     res.status(409).json({ error: 'Username already exists' });
@@ -457,6 +458,8 @@ app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
   if (req.user.id === id) return res.status(400).json({ error: 'Cannot delete yourself' });
   const user = db.deleteUser(id);
   if (!user) return res.status(404).json({ error: 'User not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'user_deleted', 'user', id, { username: user.username }, ip);
   res.json({ ok: true });
 });
 
@@ -491,12 +494,16 @@ app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req
   const permission = req.body.permission;
   const label = validString(req.body.label, 200) || '';
   const link = db.createBoardAccessLink(req.params.boardId, permission, label);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'access_link_created', 'access_link', link.id, { board_id: req.params.boardId, permission, label }, ip);
   res.status(201).json(link);
 });
 
 app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => {
   const link = db.deleteBoardAccessLink(req.params.id);
   if (!link) return res.status(404).json({ error: 'Link not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'access_link_deleted', 'access_link', link.id, { board_id: link.board_id, permission: link.permission, label: link.label }, ip);
   res.json({ ok: true });
 });
 
@@ -650,7 +657,8 @@ app.post('/api/boards', authMiddleware, requireBoardEdit, (req, res) => {
   }
   const creatorUserId = req.user ? req.user.id : null;
   const board = db.createBoard(title, creatorUserId);
-  // If non-admin users exist, add them as members too (admin creates board for team)
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(creatorUserId, 'board_created', 'board', board.id, { title: board.title }, ip);
   res.status(201).json(board);
 });
 
@@ -679,12 +687,11 @@ app.delete('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) 
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
-  const filePaths = db.getBoardAttachmentPaths(id);
   const board = db.deleteBoard(id);
   if (!board) return res.status(404).json({ error: 'Board not found' });
-  for (const fp of filePaths) {
-    try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
-  }
+  // Attachments are stored in DB and cascade-deleted with the board – no filesystem cleanup needed
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user ? req.user.id : null, 'board_deleted', 'board', id, { title: board.title }, ip);
   broadcast(id, { type: 'update', action: 'board_deleted' });
   res.json({ ok: true });
 });
@@ -859,12 +866,9 @@ app.delete('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   // Fetch boardId before deletion since the card will be gone after
   const boardId = db.getCardBoardId(id);
-  const filePaths = db.getCardAttachmentPaths(id);
   const card = db.deleteCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
-  for (const fp of filePaths) {
-    try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
-  }
+  // Attachments are stored as BLOBs in the DB and cascade-deleted with the card
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_deleted' });
   res.json({ ok: true });
 });
@@ -876,12 +880,31 @@ app.put('/api/cards/:cardId/move', authMiddleware, requireEdit, (req, res) => {
   if (!Number.isInteger(columnId) || columnId <= 0) return res.status(400).json({ error: 'columnId must be a positive integer' });
   const position = Number(req.body.position);
   if (!Number.isInteger(position) || position < 0) return res.status(400).json({ error: 'position must be a non-negative integer' });
+  // Capture source column title before the move
+  const cardBefore = db.getDb().prepare('SELECT id, text, column_id FROM cards WHERE id = ?').get(id);
+  const fromColTitle = cardBefore
+    ? (db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(cardBefore.column_id) || {}).title
+    : null;
   const card = db.moveCard(id, columnId, position);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   // After move, card.column_id is the target column; look up boardId from there
   const boardId = db.getColumnBoardId(card.column_id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_moved', cardId: id, user });
+  // Email notification to assignees (only when column actually changed)
+  if (cardBefore && cardBefore.column_id !== columnId) {
+    const toCol = db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(columnId);
+    const assignees = db.getCardAssignees(id);
+    if (assignees.length > 0 && toCol) {
+      email.notifyCardMoved({
+        card: { id, text: card.text },
+        fromColumn: fromColTitle,
+        toColumn: toCol.title,
+        byUsername: user,
+        assigneeIds: assignees.map(a => a.id),
+      }).catch(err => console.error('[EMAIL] notifyCardMoved error:', err));
+    }
+  }
   sendPushToCardWatchers(id, 'card_moved', { user }, req.user?.id);
   res.json(card);
 });
@@ -1017,6 +1040,16 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRat
   if (!comment) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created', cardId: id, user: author });
+  // Email notification to all assignees
+  const card = db.getDb().prepare('SELECT id, text FROM cards WHERE id = ?').get(id);
+  if (card) {
+    const assignees = db.getCardAssignees(id);
+    email.notifyCommentAdded({
+      card,
+      comment: { text, author },
+      assigneeIds: assignees.map(a => a.id),
+    }).catch(err => console.error('[EMAIL] notifyCommentAdded error:', err));
+  }
   // Auto-watch card when commenting
   if (req.user) db.watchCard(id, req.user.id);
   sendPushToCardWatchers(id, 'comment_added', { user: author }, req.user?.id);
@@ -1107,11 +1140,8 @@ app.post('/api/boards/:boardId/bulk', authMiddleware, requireEdit, (req, res) =>
     if (action === 'archive') {
       for (const id of validatedIds) db.archiveCard(id);
     } else if (action === 'delete') {
-      for (const id of validatedIds) {
-        const fps = db.getCardAttachmentPaths(id);
-        db.deleteCard(id);
-        for (const fp of fps) { try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {} }
-      }
+      // Attachments are stored as BLOBs in DB and cascade-deleted with the card
+      for (const id of validatedIds) db.deleteCard(id);
     } else if (action === 'move' && columnId) {
       const col = validId(columnId);
       if (col) for (const id of validatedIds) db.moveCard(id, col, 999);
@@ -1203,13 +1233,14 @@ app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, mutation
 app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const att = db.getAttachment(id);
+  const att = db.getAttachmentData(id);
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
-  const safePath = path.join(__dirname, 'uploads', path.basename(att.filepath));
-  const safeFilename = path.basename(att.filename);
-  res.download(safePath, safeFilename, (err) => {
-    if (err && !res.headersSent) res.status(500).json({ error: 'Download failed' });
-  });
+  if (!att.file_data) return res.status(404).json({ error: 'Attachment data not found' });
+  const safeFilename = path.basename(att.filename).replace(/"/g, '\\"');
+  res.setHeader('Content-Type', att.mimetype || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+  res.setHeader('Content-Length', att.file_data.length);
+  res.send(att.file_data);
 });
 
 app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
@@ -1217,8 +1248,7 @@ app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const att = db.deleteAttachment(id);
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
-  const safePath = path.join(__dirname, 'uploads', path.basename(att.filepath));
-  try { fs.unlinkSync(safePath); } catch (e) { /* file may already be gone */ }
+  // Attachment data was stored in DB – no filesystem cleanup needed
   const boardId = db.getCardBoardId(att.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_deleted' });
   res.json({ ok: true });
@@ -1234,6 +1264,15 @@ app.post('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, (r
   db.watchCard(cardId, userId);
   const boardId = db.getCardBoardId(cardId);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_assigned' });
+  // Email notification
+  const card = db.getDb().prepare('SELECT id, text FROM cards WHERE id = ?').get(cardId);
+  if (card) {
+    email.notifyCardAssigned({
+      assignedUserId: userId,
+      card,
+      byUsername: getRequestUser(req),
+    }).catch(err => console.error('[EMAIL] notifyCardAssigned error:', err));
+  }
   sendPushToCardWatchers(cardId, 'card_assigned', { user: getRequestUser(req) }, req.user?.id);
   res.json({ ok: true });
 });
@@ -1262,9 +1301,10 @@ app.post('/api/cards/:cardId/dependencies', authMiddleware, requireEdit, (req, r
   try {
     db.addCardDependency(blockingId, id);
     // get board for broadcast
-    const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+    const rawDb = db.getDb();
+    const card = rawDb.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
     if (card) {
-      const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+      const col = rawDb.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
       if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_added' });
     }
     res.json({ ok: true });
@@ -1278,9 +1318,10 @@ app.delete('/api/cards/:cardId/dependencies/:blockingId', authMiddleware, requir
   const blockingId = validId(req.params.blockingId);
   if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
   db.removeCardDependency(blockingId, id);
-  const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+  const rawDb2 = db.getDb();
+  const card = rawDb2.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
   if (card) {
-    const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+    const col = rawDb2.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
     if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_removed' });
   }
   res.json({ ok: true });
@@ -1306,6 +1347,8 @@ app.post('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
   }
   const events = typeof req.body.events === 'string' ? req.body.events : '*';
   const wh = db.createWebhook(req.params.boardId, url, events);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'webhook_created', 'webhook', wh.id, { board_id: req.params.boardId, url, events }, ip);
   res.status(201).json(wh);
 });
 
@@ -1315,6 +1358,8 @@ app.delete('/api/webhooks/:id', authMiddleware, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const wh = db.deleteWebhook(id);
   if (!wh) return res.status(404).json({ error: 'Not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'webhook_deleted', 'webhook', id, { board_id: wh.board_id, url: wh.url }, ip);
   res.json({ ok: true });
 });
 
@@ -1405,8 +1450,17 @@ app.get('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
 // PUT /api/admin/settings  → update one or more settings
 app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
   const allowed = ['resend_api_key', 'email_from', 'reminder_interval_hours', 'reminder_escalation_days'];
+  const changed = [];
   for (const key of allowed) {
-    if (req.body[key] !== undefined) db.setSetting(key, req.body[key]);
+    if (req.body[key] !== undefined) {
+      db.setSetting(key, req.body[key]);
+      // Don't log sensitive values; log which keys were changed
+      changed.push(key === 'resend_api_key' ? 'resend_api_key (masked)' : key);
+    }
+  }
+  if (changed.length > 0) {
+    const ip = req.ip || req.connection.remoteAddress;
+    db.logAudit(req.user.id, 'settings_changed', 'settings', null, { changed_keys: changed }, ip);
   }
   res.json({ ok: true });
 });
@@ -1415,6 +1469,8 @@ app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
 app.post('/api/admin/settings/rotate-api-key', authMiddleware, requireAdmin, (req, res) => {
   const newKey = require('crypto').randomBytes(24).toString('hex');
   db.setSetting('api_key', newKey);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'settings_changed', 'settings', null, { changed_keys: ['api_key (rotated)'] }, ip);
   res.json({ api_key: newKey });
 });
 
@@ -1456,6 +1512,124 @@ app.post('/api/external/tickets', apiKeyAuth, (req, res) => {
   res.status(201).json({ ok: true, card });
 });
 
+// --- User email management ---
+// GET /api/me  – already handled; here we add a PATCH for updating the email field
+app.patch('/api/me/email', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const { email: emailAddr } = req.body || {};
+  if (emailAddr !== null && emailAddr !== '' && typeof emailAddr === 'string') {
+    // Basic email format check
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr)) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    db.setUserEmail(req.user.id, emailAddr);
+  } else {
+    db.setUserEmail(req.user.id, null);
+  }
+  res.json({ ok: true });
+});
+
+// GET /api/me/profile – returns current user profile including email
+app.get('/api/me/profile', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(401).json({ error: 'Login required' });
+  const user = db.getUserById(req.user.id);
+  if (!user) return res.status(404).json({ error: 'User not found' });
+  res.json({ id: user.id, username: user.username, email: user.email || null, is_admin: user.is_admin });
+});
+
+// Admin: update any user's email
+app.patch('/api/admin/users/:id/email', authMiddleware, requireAdmin, (req, res) => {
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const { email: emailAddr } = req.body || {};
+  if (emailAddr && typeof emailAddr === 'string' && emailAddr.trim()) {
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr.trim())) {
+      return res.status(400).json({ error: 'Invalid email address' });
+    }
+    db.setUserEmail(id, emailAddr.trim());
+  } else {
+    db.setUserEmail(id, null);
+  }
+  res.json({ ok: true });
+});
+
+// --- Due-date reminder job ---
+function runDueDateReminders() {
+  try {
+    const intervalHours = parseFloat(db.getSetting('reminder_interval_hours') || '24');
+    if (!intervalHours || isNaN(intervalHours) || intervalHours <= 0) return;
+    const rows = db.getCardsDueSoon(intervalHours);
+    if (rows.length > 0) {
+      console.log(`[REMINDER] Checking due dates – ${rows.length} assignment(s) within ${intervalHours}h`);
+      email.notifyDueSoon(rows).catch(err => console.error('[REMINDER] Error sending reminders:', err));
+    }
+  } catch (err) {
+    console.error('[REMINDER] Job error:', err);
+  }
+}
+
+// Run once on startup (after a short delay) then on a regular interval
+setTimeout(runDueDateReminders, 30 * 1000);
+const REMINDER_POLL_MS = 60 * 60 * 1000; // check every hour regardless of reminder_interval_hours
+setInterval(runDueDateReminders, REMINDER_POLL_MS);
+
+// --- Admin: Audit Log ---
+
+// GET /api/admin/audit-log  → paginated audit log with optional filters
+app.get('/api/admin/audit-log', authMiddleware, requireAdmin, (req, res) => {
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 500);
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  const filters = {
+    limit,
+    offset,
+    actionType: req.query.action_type || null,
+    userId: req.query.user_id ? parseInt(req.query.user_id) : null,
+    targetType: req.query.target_type || null,
+    startDate: req.query.start_date || null,
+    endDate: req.query.end_date || null,
+  };
+  const { items, total } = db.getAuditLog(filters);
+  // Parse details JSON for each item
+  const parsed = items.map(item => ({
+    ...item,
+    details: item.details ? (() => { try { return JSON.parse(item.details); } catch { return item.details; } })() : null,
+  }));
+  res.json({ items: parsed, total, limit, offset });
+});
+
+// GET /api/admin/audit-log/export  → CSV export
+app.get('/api/admin/audit-log/export', authMiddleware, requireAdmin, (req, res) => {
+  const filters = {
+    limit: 10000,
+    offset: 0,
+    actionType: req.query.action_type || null,
+    userId: req.query.user_id ? parseInt(req.query.user_id) : null,
+    targetType: req.query.target_type || null,
+    startDate: req.query.start_date || null,
+    endDate: req.query.end_date || null,
+  };
+  const { items } = db.getAuditLog(filters);
+
+  const escCsv = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+
+  const headers = ['id', 'timestamp', 'user_id', 'username', 'action_type', 'target_type', 'target_id', 'details', 'ip_address'];
+  const rows = items.map(item => headers.map(h => {
+    if (h === 'details') return escCsv(item.details);
+    return escCsv(item[h]);
+  }).join(','));
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  const filename = 'audit-log-' + new Date().toISOString().slice(0, 10) + '.csv';
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send('\uFEFF' + csv); // BOM for Excel compatibility
+});
+
 // --- Global error handler ---
 app.use((err, req, res, next) => {
   console.error(err);
@@ -1467,6 +1641,9 @@ app.use((err, req, res, next) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[UNHANDLED REJECTION]', reason, 'Promise:', promise);
 });
+
+// --- Startup: migrate any legacy filesystem attachments into the DB ---
+db.migrateFilesystemAttachments(uploadsDir);
 
 // --- Start ---
 const server = app.listen(PORT, () => {
