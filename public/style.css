@@ -2062,4 +2062,13 @@ main#board {
 .notif-pref-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 12px; background: #f8fafc; border-radius: 8px; border: 1px solid #e2e8f0; }
 .notif-pref-label { font-size: 14px; color: #334155; }
 .notif-toggle { display: flex; align-items: center; gap: 6px; font-size: 13px; color: #64748b; cursor: pointer; }
+
+/* --- Toast notifications --- */
+@keyframes kanban-toast-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(12px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.kanban-toast {
+  animation: kanban-toast-in 0.2s ease-out;
+}
 .notif-toggle input[type="checkbox"] { width: 16px; height: 16px; cursor: pointer; }

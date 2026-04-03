@@ -4,9 +4,51 @@ let board = null;
 let currentCardId = null;
 const modifiedCards = new Set();
 
+// --- localStorage helpers (safe for Private Browsing / quota errors) ---
+function lsGet(key) {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+function lsSet(key, value) {
+  try {
+    // Quick quota probe: try writing, catch QuotaExceededError
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    if (e && (e.name === 'QuotaExceededError' || e.name === 'NS_ERROR_DOM_QUOTA_REACHED')) {
+      lsCleanup();
+      try { localStorage.setItem(key, value); return true; } catch { return false; }
+    }
+    return false;
+  }
+}
+function lsRemove(key) {
+  try { localStorage.removeItem(key); } catch { /* noop */ }
+}
+// Remove stale board-specific filter/activity keys older than 90 days
+function lsCleanup() {
+  try {
+    const now = Date.now();
+    const ninetyDays = 90 * 24 * 60 * 60 * 1000;
+    const stalePatterns = [/^kanban_priority_filter_/, /^kanban_due_filter_/, /^lastVisit_/, /^col_collapsed_/];
+    const keys = Object.keys(localStorage);
+    for (const k of keys) {
+      if (!stalePatterns.some(p => p.test(k))) continue;
+      // For lastVisit_ keys, check the stored date; for others just remove all to free space
+      if (k.startsWith('lastVisit_')) {
+        const val = localStorage.getItem(k);
+        if (val && (now - new Date(val).getTime()) > ninetyDays) {
+          localStorage.removeItem(k);
+        }
+      } else {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch { /* noop */ }
+}
+
 // --- Advanced Filter State ---
-let activePriorityFilter = localStorage.getItem('kanban_priority_filter_' + boardId) || null;
-let activeDueFilter = localStorage.getItem('kanban_due_filter_' + boardId) || null;
+let activePriorityFilter = lsGet('kanban_priority_filter_' + boardId) || null;
+let activeDueFilter = lsGet('kanban_due_filter_' + boardId) || null;
 
 // --- Undo Stack ---
 const undoStack = [];
@@ -44,12 +86,12 @@ let guestName = ''; // For access-link users
 let _accessTokenBoardId = null;
 
 function getGuestName() {
-  return guestName || localStorage.getItem('kanban_guest_name') || '';
+  return guestName || lsGet('kanban_guest_name') || '';
 }
 
 function setGuestName(name) {
   guestName = name;
-  localStorage.setItem('kanban_guest_name', name);
+  lsSet('kanban_guest_name', name);
 }
 
 function getCurrentUsername() {
@@ -60,7 +102,7 @@ function getCurrentUsername() {
 // Show guest name dialog and return a promise
 function promptGuestName() {
   return new Promise((resolve) => {
-    const stored = localStorage.getItem('kanban_guest_name');
+    const stored = lsGet('kanban_guest_name');
     if (stored) {
       guestName = stored;
       resolve(stored);
@@ -219,7 +261,12 @@ document.addEventListener('DOMContentLoaded', async () => {
     return `/api/boards/${boardId}/events` + (params.length ? '?' + params.join('&') : '');
   }
 
+  // Track whether SSE was intentionally stopped (e.g. page unload)
+  let _sseStopped = false;
+  let _sseReconnectTimer = null;
+
   function setupSSE() {
+    if (_sseStopped) return;
     let sseErrorCount = 0;
     let reconnectDelay = 2000;
     const MAX_RECONNECT_DELAY = 30000;
@@ -248,9 +295,20 @@ document.addEventListener('DOMContentLoaded', async () => {
     };
 
     es.onerror = () => {
+      if (_sseStopped) return;
       sseErrorCount++;
       console.warn('[SSE] error count:', sseErrorCount, 'next retry in', reconnectDelay + 'ms');
       es.close();
+
+      function scheduleReconnect() {
+        clearTimeout(_sseReconnectTimer);
+        _sseReconnectTimer = setTimeout(() => {
+          console.log('[SSE] reconnecting...');
+          es = null;
+          setupSSE();
+        }, reconnectDelay);
+        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
+      }
 
       if (sseErrorCount >= 5) {
         // Check if session is still valid before reconnecting
@@ -264,15 +322,6 @@ document.addEventListener('DOMContentLoaded', async () => {
       } else {
         scheduleReconnect();
       }
-
-      function scheduleReconnect() {
-        setTimeout(() => {
-          console.log('[SSE] reconnecting...');
-          es = null;
-          setupSSE();
-        }, reconnectDelay);
-        reconnectDelay = Math.min(reconnectDelay * 1.5, MAX_RECONNECT_DELAY);
-      }
     };
 
     es.onopen = () => {
@@ -283,6 +332,14 @@ document.addEventListener('DOMContentLoaded', async () => {
 
     window._eventSource = es;
   }
+
+  // Clean up SSE and pending timers on page unload
+  window.addEventListener('beforeunload', () => {
+    _sseStopped = true;
+    clearTimeout(_sseReconnectTimer);
+    clearTimeout(sseDebounceTimer);
+    if (window._eventSource) { window._eventSource.close(); window._eventSource = null; }
+  });
 
   setupSSE();
 
@@ -374,7 +431,7 @@ document.addEventListener('DOMContentLoaded', async () => {
       try {
         const results = await api(`/api/boards/${boardId}/search?q=${encodeURIComponent(query)}`);
         showSearchResults(results);
-      } catch {}
+      } catch (e) { console.warn('[Search] Fehler:', e.message); }
     }, 300);
   };
 
@@ -461,8 +518,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         filterBtn.classList.remove('filter-active');
       }
     }
-    localStorage.setItem('kanban_priority_filter_' + boardId, activePriorityFilter || '');
-    localStorage.setItem('kanban_due_filter_' + boardId, activeDueFilter || '');
+    lsSet('kanban_priority_filter_' + boardId, activePriorityFilter || '');
+    lsSet('kanban_due_filter_' + boardId, activeDueFilter || '');
   }
 
   // Advanced filter panel
@@ -541,8 +598,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   document.getElementById('clearAllFiltersBtn').onclick = () => {
     activePriorityFilter = null;
     activeDueFilter = null;
-    localStorage.removeItem('kanban_priority_filter_' + boardId);
-    localStorage.removeItem('kanban_due_filter_' + boardId);
+    lsRemove('kanban_priority_filter_' + boardId);
+    lsRemove('kanban_due_filter_' + boardId);
     labelFilter.value = '';
     document.querySelectorAll('#priorityFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
     document.querySelectorAll('#dueFilterBtns .adv-filter-btn').forEach(b => b.classList.toggle('active', b.dataset.value === ''));
@@ -873,14 +930,20 @@ async function api(url, method = 'GET', body = null) {
   return res.json();
 }
 
-// --- Error Toast ---
-function showError(msg) {
+// --- Toast notifications ---
+function showToast(msg, type = 'error', duration = 4000) {
+  const colors = { error: '#dc2626', success: '#22c55e', info: '#2563eb' };
   const toast = document.createElement('div');
-  toast.style.cssText = 'position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:#dc2626;color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);';
+  toast.className = 'kanban-toast';
+  toast.style.cssText = `position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:${colors[type] || colors.error};color:#fff;padding:12px 24px;border-radius:8px;z-index:9999;font-size:14px;box-shadow:0 4px 12px rgba(0,0,0,0.2);pointer-events:none;`;
   toast.textContent = msg;
   document.body.appendChild(toast);
-  setTimeout(() => toast.remove(), 4000);
+  setTimeout(() => toast.remove(), duration);
 }
+
+function showError(msg) { showToast(msg, 'error'); }
+function showSuccess(msg) { showToast(msg, 'success', 3000); }
+function showInfo(msg) { showToast(msg, 'info', 3000); }
 
 function showShortcutsHelp() {
   const existing = document.getElementById('shortcutsModal');
@@ -1103,7 +1166,7 @@ function createColumnEl(col) {
   collapseBtn.className = 'collapse-col-btn';
   collapseBtn.title = 'Spalte einklappen';
 
-  const isCollapsed = localStorage.getItem('col_collapsed_' + boardId + '_' + col.id) === 'true';
+  const isCollapsed = lsGet('col_collapsed_' + boardId + '_' + col.id) === 'true';
   if (isCollapsed) {
     div.classList.add('column-collapsed');
     collapseBtn.textContent = '▸';
@@ -1113,7 +1176,7 @@ function createColumnEl(col) {
 
   collapseBtn.onclick = () => {
     const collapsed = div.classList.toggle('column-collapsed');
-    localStorage.setItem('col_collapsed_' + boardId + '_' + col.id, collapsed ? 'true' : 'false');
+    lsSet('col_collapsed_' + boardId + '_' + col.id, collapsed ? 'true' : 'false');
     collapseBtn.textContent = collapsed ? '▸' : '▾';
   };
 
@@ -1236,7 +1299,7 @@ function createColumnEl(col) {
         opt.textContent = t.name;
         templateSelect.appendChild(opt);
       }
-    } catch {}
+    } catch (e) { console.warn('[Templates] Fehler:', e.message); }
   };
   templateSelect.onchange = async () => {
     const templateId = Number(templateSelect.value);
@@ -1852,7 +1915,7 @@ async function openCardModal(card) {
           }
         }
       }
-    } catch {}
+    } catch (e) { console.warn('[Assignees] Benutzerliste konnte nicht geladen werden:', e.message); }
   }
   const moveSelect = document.getElementById('moveColumnSelect');
   if (moveSelect && board) {
@@ -2286,7 +2349,7 @@ async function loadActivity(append = false) {
 
   if (!append) list.innerHTML = '';
 
-  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+  const lastVisit = lsGet('lastVisit_' + boardId);
 
   if (!append && items.length === 0) {
     list.innerHTML = '<p style="color:#94a3b8;padding:20px;text-align:center;">Noch keine Aktivität.</p>';
@@ -2323,8 +2386,8 @@ async function toggleActivity() {
   }
 
   try {
-    const lastVisit = localStorage.getItem('lastVisit_' + boardId);
-    localStorage.setItem('lastVisit_' + boardId, new Date().toISOString());
+    const lastVisit = lsGet('lastVisit_' + boardId);
+    lsSet('lastVisit_' + boardId, new Date().toISOString());
     document.getElementById('activityBadge').classList.add('hidden');
 
     await loadActivity(false);
@@ -2360,7 +2423,7 @@ function renderActivityItems(list, activities, lastVisit) {
 }
 
 async function checkNewActivity() {
-  const lastVisit = localStorage.getItem('lastVisit_' + boardId);
+  const lastVisit = lsGet('lastVisit_' + boardId);
   if (!lastVisit) return;
 
   try {
@@ -2760,7 +2823,7 @@ async function setupBoardSwitcher() {
 
     // Hide h1 when switcher is present — they both show the board name
     boardTitle.style.display = 'none';
-  } catch {}
+  } catch (e) { console.warn('[BoardSwitcher] Boards konnten nicht geladen werden:', e.message); }
 }
 
 // --- Board Members Panel ---
