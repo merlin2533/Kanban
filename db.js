@@ -1,5 +1,6 @@
 const Database = require('better-sqlite3');
 const path = require('path');
+const fs = require('fs');
 const { nanoid } = require('nanoid');
 const crypto = require('crypto');
 
@@ -291,6 +292,14 @@ try {
   db.prepare("SELECT recurrence FROM cards LIMIT 1").get();
 } catch {
   db.exec("ALTER TABLE cards ADD COLUMN recurrence TEXT DEFAULT NULL");
+}
+
+// Migration: add file_data BLOB column to attachments for DB-based storage
+try {
+  db.prepare("SELECT file_data FROM attachments LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE attachments ADD COLUMN file_data BLOB DEFAULT NULL");
+  console.log('[Migration] Added file_data column to attachments table');
 }
 
 // Migration: add role column to board_members
@@ -954,20 +963,27 @@ function deleteChecklistItem(id) {
 
 // --- Attachments ---
 
-// Fix #8: store file.filename (multer-generated name) instead of file.path
+// Store file content as BLOB in the DB (memoryStorage: file.buffer is available)
 function createAttachment(cardId, file) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
   if (!card) return null;
-  const result = db.prepare('INSERT INTO attachments (card_id, filename, filepath, mimetype, size) VALUES (?, ?, ?, ?, ?)').run(
-    cardId, file.originalname, file.filename, file.mimetype, file.size
-  );
+  const result = db.prepare(
+    'INSERT INTO attachments (card_id, filename, filepath, mimetype, size, file_data) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(cardId, file.originalname, '', file.mimetype, file.size, file.buffer);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
   if (col) logActivity(col.board_id, 'file_uploaded', { cardText: card.text, filename: file.originalname });
-  return db.prepare('SELECT * FROM attachments WHERE id = ?').get(result.lastInsertRowid);
+  // Return metadata only (exclude blob from response)
+  return db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(result.lastInsertRowid);
 }
 
+// Return metadata only (no blob)
 function getAttachment(id) {
-  return db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+  return db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(id);
+}
+
+// Return the raw file_data buffer for serving
+function getAttachmentData(id) {
+  return db.prepare('SELECT id, filename, mimetype, file_data FROM attachments WHERE id = ?').get(id);
 }
 
 function getCardAttachmentPaths(cardId) {
@@ -984,9 +1000,34 @@ function getBoardAttachmentPaths(boardId) {
 }
 
 function deleteAttachment(id) {
-  const att = db.prepare('SELECT * FROM attachments WHERE id = ?').get(id);
+  const att = db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(id);
   if (att) db.prepare('DELETE FROM attachments WHERE id = ?').run(id);
   return att;
+}
+
+// Startup migration: read any existing files from the uploads directory into the DB
+function migrateFilesystemAttachments(uploadsDir) {
+  const rows = db.prepare('SELECT id, filename, filepath FROM attachments WHERE file_data IS NULL AND filepath != ?').all('');
+  if (rows.length === 0) {
+    console.log('[Migration] No filesystem attachments to migrate.');
+    return;
+  }
+  console.log(`[Migration] Migrating ${rows.length} filesystem attachment(s) to DB...`);
+  let migrated = 0;
+  let failed = 0;
+  for (const row of rows) {
+    const diskPath = path.join(uploadsDir, path.basename(row.filepath));
+    try {
+      const buffer = fs.readFileSync(diskPath);
+      db.prepare('UPDATE attachments SET file_data = ?, filepath = ? WHERE id = ?').run(buffer, '', row.id);
+      try { fs.unlinkSync(diskPath); } catch {}
+      migrated++;
+    } catch (e) {
+      console.warn(`[Migration] Could not migrate attachment id=${row.id} (${row.filepath}): ${e.message}`);
+      failed++;
+    }
+  }
+  console.log(`[Migration] Done: ${migrated} migrated, ${failed} failed.`);
 }
 
 // --- Labels ---
@@ -1493,7 +1534,8 @@ module.exports = {
   // Checklist
   getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
   // Attachments
-  createAttachment, getAttachment, deleteAttachment, getCardAttachmentPaths, getBoardAttachmentPaths,
+  createAttachment, getAttachment, getAttachmentData, deleteAttachment,
+  getCardAttachmentPaths, getBoardAttachmentPaths, migrateFilesystemAttachments,
   // Labels
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,
   // Card Assignees

@@ -17,7 +17,7 @@ db.initSetting('reminder_interval_hours',  process.env.REMINDER_INTERVAL_HOURS  
 db.initSetting('reminder_escalation_days', process.env.REMINDER_ESCALATION_DAYS || '3');
 db.initSetting('api_key',                  process.env.API_KEY                  || require('crypto').randomBytes(24).toString('hex'));
 
-// Ensure uploads directory exists
+// Uploads directory is kept for backward-compat startup migration only
 const uploadsDir = path.join(__dirname, 'uploads');
 if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 
@@ -26,23 +26,14 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.set('trust proxy', 1);
 app.use(express.json({ limit: '1mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
-app.use('/uploads', express.static(uploadsDir));
+// /uploads static route removed – files are now served via /api/attachments/:id
 
-// --- Multer for file uploads ---
+// --- Multer for file uploads (memory storage – files stored as BLOBs in DB) ---
 const ALLOWED_MIME = new Set(['image/jpeg','image/png','image/gif','image/webp','application/pdf','text/plain']);
 const ALLOWED_EXT = new Set(['.jpg','.jpeg','.png','.gif','.webp','.pdf','.txt']);
 
-const storage = multer.diskStorage({
-  destination: path.join(__dirname, 'uploads'),
-  filename: (req, file, cb) => {
-    const unique = Date.now() + '-' + Math.round(Math.random() * 1e9);
-    const ext = path.extname(file.originalname);
-    cb(null, unique + ext);
-  }
-});
-
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 }, // 10MB max
   fileFilter: (req, file, cb) => {
     const ext = path.extname(file.originalname).toLowerCase();
@@ -584,12 +575,9 @@ app.delete('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) 
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
-  const filePaths = db.getBoardAttachmentPaths(id);
   const board = db.deleteBoard(id);
   if (!board) return res.status(404).json({ error: 'Board not found' });
-  for (const fp of filePaths) {
-    try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
-  }
+  // Attachments are stored in DB and cascade-deleted with the board – no filesystem cleanup needed
   const ip = req.ip || req.connection.remoteAddress;
   db.logAudit(req.user ? req.user.id : null, 'board_deleted', 'board', id, { title: board.title }, ip);
   broadcast(id, { type: 'update', action: 'board_deleted' });
@@ -765,12 +753,9 @@ app.delete('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   // Fetch boardId before deletion since the card will be gone after
   const boardId = db.getCardBoardId(id);
-  const filePaths = db.getCardAttachmentPaths(id);
   const card = db.deleteCard(id);
   if (!card) return res.status(404).json({ error: 'Card not found' });
-  for (const fp of filePaths) {
-    try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
-  }
+  // Attachments are stored as BLOBs in the DB and cascade-deleted with the card
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_deleted' });
   res.json({ ok: true });
 });
@@ -1035,11 +1020,8 @@ app.post('/api/boards/:boardId/bulk', authMiddleware, requireEdit, (req, res) =>
     if (action === 'archive') {
       for (const id of validatedIds) db.archiveCard(id);
     } else if (action === 'delete') {
-      for (const id of validatedIds) {
-        const fps = db.getCardAttachmentPaths(id);
-        db.deleteCard(id);
-        for (const fp of fps) { try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {} }
-      }
+      // Attachments are stored as BLOBs in DB and cascade-deleted with the card
+      for (const id of validatedIds) db.deleteCard(id);
     } else if (action === 'move' && columnId) {
       const col = validId(columnId);
       if (col) for (const id of validatedIds) db.moveCard(id, col, 999);
@@ -1130,13 +1112,14 @@ app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, mutation
 app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const att = db.getAttachment(id);
+  const att = db.getAttachmentData(id);
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
-  const safePath = path.join(__dirname, 'uploads', path.basename(att.filepath));
-  const safeFilename = path.basename(att.filename);
-  res.download(safePath, safeFilename, (err) => {
-    if (err && !res.headersSent) res.status(500).json({ error: 'Download failed' });
-  });
+  if (!att.file_data) return res.status(404).json({ error: 'Attachment data not found' });
+  const safeFilename = path.basename(att.filename).replace(/"/g, '\\"');
+  res.setHeader('Content-Type', att.mimetype || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+  res.setHeader('Content-Length', att.file_data.length);
+  res.send(att.file_data);
 });
 
 app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
@@ -1144,8 +1127,7 @@ app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const att = db.deleteAttachment(id);
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
-  const safePath = path.join(__dirname, 'uploads', path.basename(att.filepath));
-  try { fs.unlinkSync(safePath); } catch (e) { /* file may already be gone */ }
+  // Attachment data was stored in DB – no filesystem cleanup needed
   const boardId = db.getCardBoardId(att.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_deleted' });
   res.json({ ok: true });
@@ -1404,7 +1386,6 @@ app.post('/api/external/tickets', apiKeyAuth, (req, res) => {
   res.status(201).json({ ok: true, card });
 });
 
-<<<<<<< HEAD
 // --- User email management ---
 // GET /api/me  – already handled; here we add a PATCH for updating the email field
 app.patch('/api/me/email', authMiddleware, (req, res) => {
@@ -1534,6 +1515,9 @@ app.use((err, req, res, next) => {
 process.on('unhandledRejection', (reason, promise) => {
   console.error('[UNHANDLED REJECTION]', reason, 'Promise:', promise);
 });
+
+// --- Startup: migrate any legacy filesystem attachments into the DB ---
+db.migrateFilesystemAttachments(uploadsDir);
 
 // --- Start ---
 const server = app.listen(PORT, () => {
