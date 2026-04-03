@@ -180,6 +180,21 @@ db.exec(`
     email_enabled INTEGER NOT NULL DEFAULT 0,
     PRIMARY KEY (user_id, event_type)
   );
+
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp TEXT DEFAULT (datetime('now')),
+    user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action_type TEXT NOT NULL,
+    target_type TEXT,
+    target_id TEXT,
+    details TEXT,
+    ip_address TEXT
+  );
+  CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp DESC);
+  CREATE INDEX IF NOT EXISTS idx_audit_user_id ON audit_log(user_id);
+  CREATE INDEX IF NOT EXISTS idx_audit_action_type ON audit_log(action_type);
+  CREATE INDEX IF NOT EXISTS idx_audit_target_type ON audit_log(target_type);
 `);
 
 // Migration: populate board_members for existing boards/users (backward compatibility)
@@ -503,6 +518,65 @@ function logActivity(boardId, action, details, cardId) {
   db.prepare('INSERT INTO activity_log (board_id, action, details, card_id) VALUES (?, ?, ?, ?)').run(
     boardId, action, JSON.stringify(details || {}), cardId || null
   );
+}
+
+// Valid audit action types
+const AUDIT_ACTION_TYPES = [
+  'user_created', 'user_deleted', 'user_role_changed',
+  'board_created', 'board_deleted',
+  'settings_changed',
+  'login_success', 'login_failed',
+  'password_changed',
+  'access_link_created', 'access_link_deleted',
+  'webhook_created', 'webhook_deleted',
+];
+
+function logAudit(userId, actionType, targetType, targetId, details, ipAddress) {
+  try {
+    db.prepare(
+      'INSERT INTO audit_log (user_id, action_type, target_type, target_id, details, ip_address) VALUES (?, ?, ?, ?, ?, ?)'
+    ).run(
+      userId || null,
+      actionType,
+      targetType || null,
+      targetId != null ? String(targetId) : null,
+      details ? JSON.stringify(details) : null,
+      ipAddress || null
+    );
+  } catch (e) {
+    console.error('[AUDIT] Failed to write audit log:', e.message);
+  }
+}
+
+function getAuditLog({ limit = 50, offset = 0, actionType, userId, targetType, startDate, endDate } = {}) {
+  limit = Math.min(Math.max(1, parseInt(limit) || 50), 500);
+  offset = Math.max(0, parseInt(offset) || 0);
+
+  const conditions = [];
+  const params = [];
+
+  if (actionType) { conditions.push('a.action_type = ?'); params.push(actionType); }
+  if (userId) { conditions.push('a.user_id = ?'); params.push(userId); }
+  if (targetType) { conditions.push('a.target_type = ?'); params.push(targetType); }
+  if (startDate) { conditions.push("a.timestamp >= ?"); params.push(startDate); }
+  if (endDate) { conditions.push("a.timestamp <= ?"); params.push(endDate); }
+
+  const where = conditions.length ? 'WHERE ' + conditions.join(' AND ') : '';
+
+  const items = db.prepare(`
+    SELECT a.*, u.username
+    FROM audit_log a
+    LEFT JOIN users u ON a.user_id = u.id
+    ${where}
+    ORDER BY a.timestamp DESC
+    LIMIT ? OFFSET ?
+  `).all(...params, limit, offset);
+
+  const total = db.prepare(`
+    SELECT COUNT(*) as count FROM audit_log a ${where}
+  `).get(...params).count;
+
+  return { items, total };
 }
 
 // --- Boards ---
@@ -1459,6 +1533,8 @@ module.exports = {
   getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
   // Due-date reminders
   getCardsDueSoon,
+  // Audit Log
+  logAudit, getAuditLog, AUDIT_ACTION_TYPES,
   // Raw DB
   getDb,
 };

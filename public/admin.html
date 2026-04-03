@@ -277,6 +277,65 @@
       .btn-danger { background: #3b1c1c; color: #f87171; }
     }
 
+    /* Audit Log */
+    .audit-toolbar {
+      display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px; align-items: flex-end;
+    }
+    .audit-toolbar label { font-size: 12px; color: #64748b; display: flex; flex-direction: column; gap: 4px; }
+    .audit-table-wrap { overflow-x: auto; }
+    .audit-table {
+      width: 100%; border-collapse: collapse; font-size: 13px;
+    }
+    .audit-table th {
+      background: #f8fafc; text-align: left; padding: 8px 10px;
+      border-bottom: 2px solid #e2e8f0; font-size: 12px; color: #64748b; font-weight: 600;
+      white-space: nowrap;
+    }
+    .audit-table td {
+      padding: 8px 10px; border-bottom: 1px solid #f1f5f9;
+      vertical-align: top; max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+    .audit-table tr:last-child td { border-bottom: none; }
+    .audit-table tr:hover td { background: #f8fafc; }
+    .audit-badge {
+      display: inline-block; padding: 2px 8px; border-radius: 10px;
+      font-size: 11px; font-weight: 600;
+    }
+    .audit-badge.login_success { background: #f0fdf4; color: #16a34a; }
+    .audit-badge.login_failed { background: #fef2f2; color: #dc2626; }
+    .audit-badge.user_created { background: #eff6ff; color: #2563eb; }
+    .audit-badge.user_deleted { background: #fef2f2; color: #dc2626; }
+    .audit-badge.board_created { background: #f0fdf4; color: #16a34a; }
+    .audit-badge.board_deleted { background: #fef2f2; color: #dc2626; }
+    .audit-badge.settings_changed { background: #fefce8; color: #ca8a04; }
+    .audit-badge.password_changed { background: #fdf4ff; color: #9333ea; }
+    .audit-badge.access_link_created { background: #eff6ff; color: #2563eb; }
+    .audit-badge.access_link_deleted { background: #fef2f2; color: #dc2626; }
+    .audit-badge.webhook_created { background: #f0fdf4; color: #16a34a; }
+    .audit-badge.webhook_deleted { background: #fef2f2; color: #dc2626; }
+    .audit-badge.default { background: #f1f5f9; color: #64748b; }
+    .audit-pagination {
+      display: flex; align-items: center; gap: 8px; margin-top: 16px;
+      justify-content: flex-end; font-size: 13px; color: #64748b;
+    }
+    .audit-details-cell { cursor: pointer; color: #64748b; }
+    .audit-details-cell:hover { color: #1e293b; }
+    @media (prefers-color-scheme: dark) {
+      .audit-table th { background: #0f172a; border-color: #334155; color: #64748b; }
+      .audit-table td { border-color: #1e293b; color: #e2e8f0; }
+      .audit-table tr:hover td { background: #1e293b; }
+      .audit-badge.login_failed, .audit-badge.user_deleted, .audit-badge.board_deleted,
+      .audit-badge.access_link_deleted, .audit-badge.webhook_deleted { background: #3b1c1c; }
+      .audit-badge.login_success, .audit-badge.board_created,
+      .audit-badge.webhook_created { background: #0a2e1a; }
+      .audit-badge.user_created, .audit-badge.access_link_created { background: #1e3a5f; }
+      .audit-badge.settings_changed { background: #2d2000; }
+      .audit-badge.password_changed { background: #2d1649; }
+      .audit-badge.default { background: #334155; }
+      .audit-details-cell { color: #94a3b8; }
+      .audit-details-cell:hover { color: #e2e8f0; }
+    }
+
     /* Settings */
     .settings-group { margin-bottom: 20px; }
     .settings-group label { display: block; font-size: 13px; font-weight: 500; color: #475569; margin-bottom: 6px; }
@@ -324,6 +383,7 @@
       <button class="tab" data-tab="access">Board-Zugriff</button>
       <button class="tab" data-tab="export">Daten & Export</button>
       <button class="tab" data-tab="settings">Einstellungen</button>
+      <button class="tab" data-tab="auditlog">Audit-Log</button>
     </div>
 
     <!-- Users tab -->
@@ -412,6 +472,67 @@
       </div>
     </div>
 
+    <!-- Audit Log tab -->
+    <div class="tab-panel" id="tab-auditlog">
+      <div class="admin-card">
+        <h2>Audit-Log</h2>
+        <p style="color:#64748b;font-size:13px;margin-bottom:16px;">
+          Sicherheitsrelevante und administrative Aktionen werden hier protokolliert.
+        </p>
+        <div class="audit-toolbar">
+          <label>Aktion
+            <select class="form-select" id="auditFilterAction" style="min-width:160px;">
+              <option value="">Alle Aktionen</option>
+              <option value="login_success">Login erfolgreich</option>
+              <option value="login_failed">Login fehlgeschlagen</option>
+              <option value="password_changed">Passwort geändert</option>
+              <option value="user_created">Benutzer erstellt</option>
+              <option value="user_deleted">Benutzer gelöscht</option>
+              <option value="user_role_changed">Rolle geändert</option>
+              <option value="board_created">Board erstellt</option>
+              <option value="board_deleted">Board gelöscht</option>
+              <option value="settings_changed">Einstellungen geändert</option>
+              <option value="access_link_created">Zugangslink erstellt</option>
+              <option value="access_link_deleted">Zugangslink gelöscht</option>
+              <option value="webhook_created">Webhook erstellt</option>
+              <option value="webhook_deleted">Webhook gelöscht</option>
+            </select>
+          </label>
+          <label>Von
+            <input type="date" class="form-input" id="auditFilterStart" style="min-width:140px;">
+          </label>
+          <label>Bis
+            <input type="date" class="form-input" id="auditFilterEnd" style="min-width:140px;">
+          </label>
+          <button class="btn-primary" id="auditFilterBtn" style="align-self:flex-end;">Filtern</button>
+          <button class="btn-secondary" id="auditResetBtn" style="align-self:flex-end;">Zurücksetzen</button>
+          <a id="auditExportBtn" class="btn-secondary" style="align-self:flex-end;text-decoration:none;">CSV Export</a>
+        </div>
+        <div class="audit-table-wrap">
+          <table class="audit-table">
+            <thead>
+              <tr>
+                <th>Zeitpunkt</th>
+                <th>Benutzer</th>
+                <th>Aktion</th>
+                <th>Ziel</th>
+                <th>Details</th>
+                <th>IP-Adresse</th>
+              </tr>
+            </thead>
+            <tbody id="auditLogBody">
+              <tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px;">Wird geladen…</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="audit-pagination">
+          <span id="auditPaginationInfo"></span>
+          <button class="btn-secondary" id="auditPrevBtn" disabled>← Zurück</button>
+          <button class="btn-secondary" id="auditNextBtn" disabled>Weiter →</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Export tab -->
     <div class="tab-panel" id="tab-export">
       <div class="admin-card">
@@ -456,6 +577,7 @@
         if (tab.dataset.tab === 'access') loadBoardAccess();
         else if (tab.dataset.tab === 'export') loadBoardDownloads();
         else if (tab.dataset.tab === 'settings') loadSettings();
+        else if (tab.dataset.tab === 'auditlog') { auditOffset = 0; loadAuditLog(); }
       });
     });
 
@@ -886,6 +1008,152 @@
         _apiKeyVisible = true;
         document.getElementById('apiKeyDisplay').textContent = _apiKeyValue;
         document.getElementById('toggleApiKeyBtn').textContent = 'Verbergen';
+      }
+    });
+
+    // --- Audit Log ---
+    let auditOffset = 0;
+    const auditLimit = 50;
+    let auditTotal = 0;
+
+    function getAuditFilters() {
+      return {
+        action_type: document.getElementById('auditFilterAction').value || '',
+        start_date: document.getElementById('auditFilterStart').value || '',
+        end_date: document.getElementById('auditFilterEnd').value
+          ? document.getElementById('auditFilterEnd').value + ' 23:59:59'
+          : '',
+      };
+    }
+
+    function buildAuditUrl(extra = {}) {
+      const f = { ...getAuditFilters(), limit: auditLimit, offset: auditOffset, ...extra };
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(f)) { if (v !== '') params.set(k, v); }
+      return '/api/admin/audit-log?' + params.toString();
+    }
+
+    async function loadAuditLog() {
+      const tbody = document.getElementById('auditLogBody');
+      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px;">Wird geladen…</td></tr>';
+      try {
+        const res = await fetch(buildAuditUrl());
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        auditTotal = data.total;
+        renderAuditTable(data.items);
+        updateAuditPagination();
+        updateAuditExportLink();
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#dc2626;padding:24px;">Fehler beim Laden: ' + e.message + '</td></tr>';
+      }
+    }
+
+    function renderAuditTable(items) {
+      const tbody = document.getElementById('auditLogBody');
+      if (!items || items.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:#94a3b8;padding:24px;">Keine Einträge gefunden.</td></tr>';
+        return;
+      }
+      tbody.innerHTML = '';
+      for (const item of items) {
+        const tr = document.createElement('tr');
+
+        // Timestamp
+        const tdTime = document.createElement('td');
+        const d = new Date(item.timestamp + (item.timestamp.includes('T') ? '' : 'Z'));
+        tdTime.textContent = isNaN(d) ? item.timestamp : d.toLocaleString('de-DE');
+        tdTime.style.whiteSpace = 'nowrap';
+        tr.appendChild(tdTime);
+
+        // Username
+        const tdUser = document.createElement('td');
+        tdUser.textContent = item.username || (item.user_id ? '#' + item.user_id : '—');
+        tr.appendChild(tdUser);
+
+        // Action type badge
+        const tdAction = document.createElement('td');
+        const badge = document.createElement('span');
+        const badgeClass = item.action_type in {
+          login_success:1, login_failed:1, user_created:1, user_deleted:1,
+          board_created:1, board_deleted:1, settings_changed:1, password_changed:1,
+          access_link_created:1, access_link_deleted:1, webhook_created:1, webhook_deleted:1
+        } ? item.action_type : 'default';
+        badge.className = 'audit-badge ' + badgeClass;
+        badge.textContent = item.action_type;
+        tdAction.appendChild(badge);
+        tr.appendChild(tdAction);
+
+        // Target
+        const tdTarget = document.createElement('td');
+        if (item.target_type) {
+          tdTarget.textContent = item.target_type + (item.target_id ? ' #' + item.target_id : '');
+        } else {
+          tdTarget.textContent = '—';
+        }
+        tr.appendChild(tdTarget);
+
+        // Details
+        const tdDetails = document.createElement('td');
+        if (item.details) {
+          const detailsStr = typeof item.details === 'object'
+            ? JSON.stringify(item.details)
+            : String(item.details);
+          tdDetails.title = detailsStr;
+          tdDetails.className = 'audit-details-cell';
+          tdDetails.textContent = detailsStr.length > 60 ? detailsStr.slice(0, 57) + '…' : detailsStr;
+        } else {
+          tdDetails.textContent = '—';
+        }
+        tr.appendChild(tdDetails);
+
+        // IP
+        const tdIp = document.createElement('td');
+        tdIp.textContent = item.ip_address || '—';
+        tr.appendChild(tdIp);
+
+        tbody.appendChild(tr);
+      }
+    }
+
+    function updateAuditPagination() {
+      const info = document.getElementById('auditPaginationInfo');
+      const start = auditTotal === 0 ? 0 : auditOffset + 1;
+      const end = Math.min(auditOffset + auditLimit, auditTotal);
+      info.textContent = auditTotal === 0 ? 'Keine Einträge' : start + '–' + end + ' von ' + auditTotal;
+      document.getElementById('auditPrevBtn').disabled = auditOffset === 0;
+      document.getElementById('auditNextBtn').disabled = auditOffset + auditLimit >= auditTotal;
+    }
+
+    function updateAuditExportLink() {
+      const f = getAuditFilters();
+      const params = new URLSearchParams();
+      for (const [k, v] of Object.entries(f)) { if (v !== '') params.set(k, v); }
+      document.getElementById('auditExportBtn').href = '/api/admin/audit-log/export?' + params.toString();
+    }
+
+    document.getElementById('auditFilterBtn').addEventListener('click', () => {
+      auditOffset = 0;
+      loadAuditLog();
+    });
+
+    document.getElementById('auditResetBtn').addEventListener('click', () => {
+      document.getElementById('auditFilterAction').value = '';
+      document.getElementById('auditFilterStart').value = '';
+      document.getElementById('auditFilterEnd').value = '';
+      auditOffset = 0;
+      loadAuditLog();
+    });
+
+    document.getElementById('auditPrevBtn').addEventListener('click', () => {
+      auditOffset = Math.max(0, auditOffset - auditLimit);
+      loadAuditLog();
+    });
+
+    document.getElementById('auditNextBtn').addEventListener('click', () => {
+      if (auditOffset + auditLimit < auditTotal) {
+        auditOffset += auditLimit;
+        loadAuditLog();
       }
     });
 

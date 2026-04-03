@@ -231,6 +231,9 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
     const attempts = loginAttempts.get(ip) || [];
     attempts.push(Date.now());
     loginAttempts.set(ip, attempts);
+    // Look up user id for audit (may be null if username doesn't exist)
+    const existingUser = db.getDb().prepare('SELECT id FROM users WHERE username = ?').get(username);
+    db.logAudit(existingUser ? existingUser.id : null, 'login_failed', 'user', null, { username }, ip);
     return res.status(401).json({ error: 'Invalid credentials' });
   }
   const session = db.createSession(user.id);
@@ -239,6 +242,7 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
   const cookieStr = `kanban_session=${session.id}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${30*24*60*60}${secure}`;
   authLog('login: SUCCESS user:', username, 'session:', session.id.substring(0, 8) + '...', 'isHttps:', isHttps, 'secure flag:', !!secure, 'NODE_ENV:', process.env.NODE_ENV);
   authLog('login: Set-Cookie:', cookieStr.replace(session.id, session.id.substring(0, 8) + '...'));
+  db.logAudit(user.id, 'login_success', 'user', user.id, { username: user.username }, ip);
   res.setHeader('Set-Cookie', cookieStr);
   const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
   res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 });
@@ -297,6 +301,8 @@ app.post('/api/auth/change-password', authMiddleware, (req, res) => {
   const user = db.authenticateUser(req.user.username, currentPassword);
   if (!user) return res.status(401).json({ error: 'Current password incorrect' });
   db.changePassword(req.user.id, newPassword);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'password_changed', 'user', req.user.id, { username: req.user.username }, ip);
   res.json({ ok: true });
 });
 
@@ -333,7 +339,10 @@ app.post('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   const password = req.body.password;
   if (!password || password.length < 6) return res.status(400).json({ error: 'password must be at least 6 chars' });
   try {
-    const user = db.createUser(username, password, req.body.is_admin || false);
+    const isAdmin = !!(req.body.is_admin);
+    const user = db.createUser(username, password, isAdmin);
+    const ip = req.ip || req.connection.remoteAddress;
+    db.logAudit(req.user.id, 'user_created', 'user', user.id, { username, is_admin: isAdmin }, ip);
     res.status(201).json(user);
   } catch (e) {
     res.status(409).json({ error: 'Username already exists' });
@@ -346,6 +355,8 @@ app.delete('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
   if (req.user.id === id) return res.status(400).json({ error: 'Cannot delete yourself' });
   const user = db.deleteUser(id);
   if (!user) return res.status(404).json({ error: 'User not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'user_deleted', 'user', id, { username: user.username }, ip);
   res.json({ ok: true });
 });
 
@@ -380,12 +391,16 @@ app.post('/api/boards/:boardId/access-links', authMiddleware, requireAdmin, (req
   const permission = req.body.permission;
   const label = validString(req.body.label, 200) || '';
   const link = db.createBoardAccessLink(req.params.boardId, permission, label);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'access_link_created', 'access_link', link.id, { board_id: req.params.boardId, permission, label }, ip);
   res.status(201).json(link);
 });
 
 app.delete('/api/access-links/:id', authMiddleware, requireAdmin, (req, res) => {
   const link = db.deleteBoardAccessLink(req.params.id);
   if (!link) return res.status(404).json({ error: 'Link not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'access_link_deleted', 'access_link', link.id, { board_id: link.board_id, permission: link.permission, label: link.label }, ip);
   res.json({ ok: true });
 });
 
@@ -539,7 +554,8 @@ app.post('/api/boards', authMiddleware, requireBoardEdit, (req, res) => {
   }
   const creatorUserId = req.user ? req.user.id : null;
   const board = db.createBoard(title, creatorUserId);
-  // If non-admin users exist, add them as members too (admin creates board for team)
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(creatorUserId, 'board_created', 'board', board.id, { title: board.title }, ip);
   res.status(201).json(board);
 });
 
@@ -574,6 +590,8 @@ app.delete('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) 
   for (const fp of filePaths) {
     try { fs.unlinkSync(path.join(uploadsDir, path.basename(fp))); } catch {}
   }
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user ? req.user.id : null, 'board_deleted', 'board', id, { title: board.title }, ip);
   broadcast(id, { type: 'update', action: 'board_deleted' });
   res.json({ ok: true });
 });
@@ -1221,6 +1239,8 @@ app.post('/api/boards/:boardId/webhooks', authMiddleware, (req, res) => {
   }
   const events = typeof req.body.events === 'string' ? req.body.events : '*';
   const wh = db.createWebhook(req.params.boardId, url, events);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'webhook_created', 'webhook', wh.id, { board_id: req.params.boardId, url, events }, ip);
   res.status(201).json(wh);
 });
 
@@ -1230,6 +1250,8 @@ app.delete('/api/webhooks/:id', authMiddleware, (req, res) => {
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const wh = db.deleteWebhook(id);
   if (!wh) return res.status(404).json({ error: 'Not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'webhook_deleted', 'webhook', id, { board_id: wh.board_id, url: wh.url }, ip);
   res.json({ ok: true });
 });
 
@@ -1320,8 +1342,17 @@ app.get('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
 // PUT /api/admin/settings  → update one or more settings
 app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
   const allowed = ['resend_api_key', 'email_from', 'reminder_interval_hours', 'reminder_escalation_days'];
+  const changed = [];
   for (const key of allowed) {
-    if (req.body[key] !== undefined) db.setSetting(key, req.body[key]);
+    if (req.body[key] !== undefined) {
+      db.setSetting(key, req.body[key]);
+      // Don't log sensitive values; log which keys were changed
+      changed.push(key === 'resend_api_key' ? 'resend_api_key (masked)' : key);
+    }
+  }
+  if (changed.length > 0) {
+    const ip = req.ip || req.connection.remoteAddress;
+    db.logAudit(req.user.id, 'settings_changed', 'settings', null, { changed_keys: changed }, ip);
   }
   res.json({ ok: true });
 });
@@ -1330,6 +1361,8 @@ app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
 app.post('/api/admin/settings/rotate-api-key', authMiddleware, requireAdmin, (req, res) => {
   const newKey = require('crypto').randomBytes(24).toString('hex');
   db.setSetting('api_key', newKey);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'settings_changed', 'settings', null, { changed_keys: ['api_key (rotated)'] }, ip);
   res.json({ api_key: newKey });
 });
 
@@ -1371,6 +1404,7 @@ app.post('/api/external/tickets', apiKeyAuth, (req, res) => {
   res.status(201).json({ ok: true, card });
 });
 
+<<<<<<< HEAD
 // --- User email management ---
 // GET /api/me  – already handled; here we add a PATCH for updating the email field
 app.patch('/api/me/email', authMiddleware, (req, res) => {
@@ -1431,6 +1465,63 @@ function runDueDateReminders() {
 setTimeout(runDueDateReminders, 30 * 1000);
 const REMINDER_POLL_MS = 60 * 60 * 1000; // check every hour regardless of reminder_interval_hours
 setInterval(runDueDateReminders, REMINDER_POLL_MS);
+
+// --- Admin: Audit Log ---
+
+// GET /api/admin/audit-log  → paginated audit log with optional filters
+app.get('/api/admin/audit-log', authMiddleware, requireAdmin, (req, res) => {
+  const limit = Math.min(Math.max(1, parseInt(req.query.limit) || 50), 500);
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  const filters = {
+    limit,
+    offset,
+    actionType: req.query.action_type || null,
+    userId: req.query.user_id ? parseInt(req.query.user_id) : null,
+    targetType: req.query.target_type || null,
+    startDate: req.query.start_date || null,
+    endDate: req.query.end_date || null,
+  };
+  const { items, total } = db.getAuditLog(filters);
+  // Parse details JSON for each item
+  const parsed = items.map(item => ({
+    ...item,
+    details: item.details ? (() => { try { return JSON.parse(item.details); } catch { return item.details; } })() : null,
+  }));
+  res.json({ items: parsed, total, limit, offset });
+});
+
+// GET /api/admin/audit-log/export  → CSV export
+app.get('/api/admin/audit-log/export', authMiddleware, requireAdmin, (req, res) => {
+  const filters = {
+    limit: 10000,
+    offset: 0,
+    actionType: req.query.action_type || null,
+    userId: req.query.user_id ? parseInt(req.query.user_id) : null,
+    targetType: req.query.target_type || null,
+    startDate: req.query.start_date || null,
+    endDate: req.query.end_date || null,
+  };
+  const { items } = db.getAuditLog(filters);
+
+  const escCsv = (v) => {
+    if (v == null) return '';
+    const s = String(v);
+    if (s.includes(',') || s.includes('"') || s.includes('\n')) return '"' + s.replace(/"/g, '""') + '"';
+    return s;
+  };
+
+  const headers = ['id', 'timestamp', 'user_id', 'username', 'action_type', 'target_type', 'target_id', 'details', 'ip_address'];
+  const rows = items.map(item => headers.map(h => {
+    if (h === 'details') return escCsv(item.details);
+    return escCsv(item[h]);
+  }).join(','));
+
+  const csv = [headers.join(','), ...rows].join('\r\n');
+  const filename = 'audit-log-' + new Date().toISOString().slice(0, 10) + '.csv';
+  res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+  res.send('\uFEFF' + csv); // BOM for Excel compatibility
+});
 
 // --- Global error handler ---
 app.use((err, req, res, next) => {
