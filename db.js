@@ -124,7 +124,7 @@ db.exec(`
   CREATE INDEX IF NOT EXISTS idx_board_access_board_id ON board_access_links(board_id);
   CREATE INDEX IF NOT EXISTS idx_activity_board_created ON activity_log(board_id, created_at DESC);
   CREATE INDEX IF NOT EXISTS idx_cards_column_pos ON cards(column_id, position);
-  CREATE INDEX IF NOT EXISTS idx_cards_board ON cards(board_id);
+  CREATE INDEX IF NOT EXISTS idx_cards_board ON cards(column_id);
 
   CREATE TABLE IF NOT EXISTS card_assignees (
     card_id INTEGER NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
