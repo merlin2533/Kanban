@@ -1177,9 +1177,10 @@ app.post('/api/cards/:cardId/dependencies', authMiddleware, requireEdit, (req, r
   try {
     db.addCardDependency(blockingId, id);
     // get board for broadcast
-    const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+    const rawDb = db.getDb();
+    const card = rawDb.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
     if (card) {
-      const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+      const col = rawDb.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
       if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_added' });
     }
     res.json({ ok: true });
@@ -1193,9 +1194,10 @@ app.delete('/api/cards/:cardId/dependencies/:blockingId', authMiddleware, requir
   const blockingId = validId(req.params.blockingId);
   if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
   db.removeCardDependency(blockingId, id);
-  const card = db.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
+  const rawDb2 = db.getDb();
+  const card = rawDb2.prepare('SELECT column_id FROM cards WHERE id = ?').get(id);
   if (card) {
-    const col = db.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
+    const col = rawDb2.prepare('SELECT board_id FROM columns WHERE id = ?').get(card.column_id);
     if (col) broadcast(col.board_id, { type: 'update', action: 'dependency_removed' });
   }
   res.json({ ok: true });
