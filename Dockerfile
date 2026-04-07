@@ -16,7 +16,7 @@ WORKDIR /app
 # Copy only production node_modules (includes native better-sqlite3)
 COPY --from=builder /app/node_modules ./node_modules
 COPY package.json ./
-COPY server.js db.js ./
+COPY server.js db.js email.js ./
 COPY public/ ./public/
 COPY uploads/.gitkeep ./uploads/
 
