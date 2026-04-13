@@ -41,8 +41,8 @@ app.use(express.static(path.join(__dirname, 'public')));
 // /uploads static route removed – files are now served via /api/attachments/:id
 
 // --- Multer for file uploads (memory storage – files stored as BLOBs in DB) ---
-const ALLOWED_MIME = new Set(['image/jpeg','image/png','image/gif','image/webp','application/pdf','text/plain']);
-const ALLOWED_EXT = new Set(['.jpg','.jpeg','.png','.gif','.webp','.pdf','.txt']);
+const ALLOWED_MIME = new Set(['image/jpeg','image/png','image/gif','image/webp','application/pdf','text/plain','text/csv','application/vnd.ms-excel','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet']);
+const ALLOWED_EXT = new Set(['.jpg','.jpeg','.png','.gif','.webp','.pdf','.txt','.csv','.xls','.xlsx']);
 
 const upload = multer({
   storage: multer.memoryStorage(),

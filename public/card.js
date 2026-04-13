@@ -892,7 +892,14 @@ function renderAttachments(attachments) {
     } else {
       const icon = document.createElement('div');
       icon.className = 'attachment-icon';
-      icon.textContent = '\uD83D\uDCC4';
+      const ext = att.filename ? att.filename.split('.').pop().toLowerCase() : '';
+      if (att.mimetype === 'text/csv' || ext === 'csv') {
+        icon.textContent = '\uD83D\uDCCA'; // 📊
+      } else if (att.mimetype === 'application/vnd.ms-excel' || att.mimetype === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || ext === 'xls' || ext === 'xlsx') {
+        icon.textContent = '\uD83D\uDCCA'; // 📊
+      } else {
+        icon.textContent = '\uD83D\uDCC4'; // 📄
+      }
       item.appendChild(icon);
     }
     const info = document.createElement('div');
