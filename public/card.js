@@ -506,6 +506,10 @@ function renderComment(comment) {
     name.className = 'comment-author-name';
     name.textContent = comment.author;
     authorDiv.appendChild(name);
+    const headerTime = document.createElement('span');
+    headerTime.className = 'comment-header-time';
+    headerTime.textContent = formatTime(comment.created_at);
+    authorDiv.appendChild(headerTime);
     item.appendChild(authorDiv);
   }
 
@@ -1632,6 +1636,16 @@ function setupTemplateButton() {
   }
 }
 
+function setupCollapsibleSections() {
+  document.querySelectorAll('.sidebar-collapsible .sidebar-collapsible-toggle').forEach(toggle => {
+    toggle.style.cursor = 'pointer';
+    toggle.addEventListener('click', () => {
+      const section = toggle.closest('.sidebar-collapsible');
+      section.classList.toggle('collapsed');
+    });
+  });
+}
+
 // --- Init ---
 if (!boardId || !cardId) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -1658,6 +1672,7 @@ if (!boardId || !cardId) {
     setupSSE();
     setupNotificationCheck();
     setupTemplateButton();
+    setupCollapsibleSections();
     // Watch button
     loadWatchStatus();
     const watchBtn = document.getElementById('watchCardBtn');
