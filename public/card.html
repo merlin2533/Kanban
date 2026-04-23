@@ -44,9 +44,17 @@
             <h3 class="card-page-section-label">Beschreibung</h3>
             <button id="descPreviewBtn" class="desc-preview-btn" title="Vorschau umschalten">Vorschau</button>
           </div>
-          <textarea id="cardDescription" class="card-page-description" placeholder="Beschreibung hinzufügen... (Markdown unterstützt)" rows="5" aria-label="Beschreibung"></textarea>
+          <div class="md-toolbar" id="descToolbar">
+            <button type="button" class="md-btn" data-action="bold" title="Fett"><strong>B</strong></button>
+            <button type="button" class="md-btn" data-action="italic" title="Kursiv"><em>I</em></button>
+            <button type="button" class="md-btn" data-action="heading" title="Überschrift">H</button>
+            <button type="button" class="md-btn" data-action="list" title="Liste">&#8801;</button>
+            <button type="button" class="md-btn" data-action="code" title="Code">&#96;&#96;</button>
+            <button type="button" class="md-btn" data-action="link" title="Link">&#128279;</button>
+            <button type="button" class="md-btn" data-action="image" title="Bild einfügen">&#128247;</button>
+          </div>
+          <textarea id="cardDescription" class="card-page-description" placeholder="Beschreibung hinzufügen... (Markdown unterstützt)" rows="10" aria-label="Beschreibung"></textarea>
           <div id="descPreview" class="card-page-desc-preview hidden"></div>
-          <small class="comment-markdown-hint">Markdown: **fett**, *kursiv*, `code`, [Link](url) &nbsp;|&nbsp; Bilder: Strg+V einfügen</small>
         </section>
 
         <!-- Comments -->
@@ -54,9 +62,18 @@
           <h3 class="card-page-section-label">Kommentare</h3>
           <!-- Input first so new comments are added at top (newest first) -->
           <div class="card-page-comment-form">
-            <textarea id="commentInput" class="card-page-comment-input" placeholder="Kommentar schreiben..." rows="2" aria-label="Neuer Kommentar"></textarea>
+            <div class="md-toolbar" id="commentToolbar">
+              <button type="button" class="md-btn" data-action="bold" title="Fett"><strong>B</strong></button>
+              <button type="button" class="md-btn" data-action="italic" title="Kursiv"><em>I</em></button>
+              <button type="button" class="md-btn" data-action="heading" title="Überschrift">H</button>
+              <button type="button" class="md-btn" data-action="list" title="Liste">&#8801;</button>
+              <button type="button" class="md-btn" data-action="code" title="Code">&#96;&#96;</button>
+              <button type="button" class="md-btn" data-action="link" title="Link">&#128279;</button>
+              <button type="button" class="md-btn" data-action="image" title="Bild einfügen">&#128247;</button>
+            </div>
+            <textarea id="commentInput" class="card-page-comment-input" placeholder="Kommentar schreiben..." rows="4" aria-label="Neuer Kommentar"></textarea>
             <div class="card-page-comment-form-footer">
-              <small class="comment-markdown-hint">Markdown: **fett**, *kursiv*, `code`, [Link](url) &nbsp;|&nbsp; Bilder: Strg+V einfügen</small>
+              <small class="comment-markdown-hint">Markdown: **fett**, *kursiv*, `code`, [Link](url) &nbsp;|&nbsp; Strg+V für Bilder</small>
               <button id="addCommentBtn" class="btn-primary">Senden</button>
             </div>
           </div>

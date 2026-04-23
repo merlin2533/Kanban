@@ -219,7 +219,7 @@ function renderMarkdown(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/!\[([^\]]*)\]\((\/uploads\/[^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">')
+    .replace(/!\[([^\]]*)\]\((\/(?:uploads\/|api\/attachments\/)[^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">')
     .replace(/\[(.+?)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
@@ -247,7 +247,7 @@ async function handleImagePaste(e, textarea, afterUpload) {
     const form = new FormData();
     form.append('file', file);
     const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
-    const md = `![${att.filename}](/uploads/${att.filepath})`;
+    const md = `![${att.filename}](/api/attachments/${att.id})`;
     textarea.value = textarea.value.replace(placeholder, md);
     textarea.dispatchEvent(new Event('input'));
     if (afterUpload) await afterUpload();
@@ -255,6 +255,69 @@ async function handleImagePaste(e, textarea, afterUpload) {
     textarea.value = textarea.value.replace(placeholder, '');
     showError('Bild-Upload fehlgeschlagen: ' + err.message);
   }
+}
+
+// --- Markdown toolbar ---
+function insertMarkdown(textarea, before, after, placeholder) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.substring(start, end) || placeholder;
+  const newText = before + selected + after;
+  textarea.value = textarea.value.substring(0, start) + newText + textarea.value.substring(end);
+  if (start === end) {
+    textarea.selectionStart = start + before.length;
+    textarea.selectionEnd = start + before.length + placeholder.length;
+  } else {
+    textarea.selectionStart = start;
+    textarea.selectionEnd = start + newText.length;
+  }
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function setupMarkdownToolbar(textarea, toolbar) {
+  if (!toolbar || !textarea) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+
+  fileInput.onchange = async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    fileInput.value = '';
+    const placeholder = '![Bild wird hochgeladen...]()';
+    insertAtCursor(textarea, placeholder);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
+      const md = `![${att.filename}](/api/attachments/${att.id})`;
+      textarea.value = textarea.value.replace(placeholder, md);
+      textarea.dispatchEvent(new Event('input'));
+    } catch (err) {
+      textarea.value = textarea.value.replace(placeholder, '');
+      showError('Bild-Upload fehlgeschlagen: ' + err.message);
+    }
+  };
+
+  toolbar.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    e.preventDefault();
+    const action = btn.dataset.action;
+    switch (action) {
+      case 'bold':    insertMarkdown(textarea, '**', '**', 'fetter Text'); break;
+      case 'italic':  insertMarkdown(textarea, '*', '*', 'kursiver Text'); break;
+      case 'heading': insertMarkdown(textarea, '## ', '', 'Überschrift'); break;
+      case 'list':    insertMarkdown(textarea, '- ', '', 'Listenpunkt'); break;
+      case 'code':    insertMarkdown(textarea, '`', '`', 'code'); break;
+      case 'link':    insertMarkdown(textarea, '[', '](https://)', 'Link-Text'); break;
+      case 'image':   fileInput.click(); break;
+    }
+  });
 }
 
 // --- Load card data ---
@@ -378,7 +441,8 @@ function renderCardPage() {
     document.querySelectorAll('.priority-btn').forEach(b => b.disabled = true);
     document.getElementById('addCommentBtn').style.display = 'none';
     document.getElementById('commentInput').style.display = 'none';
-    document.querySelector('.comment-markdown-hint').style.display = 'none';
+    document.querySelectorAll('.comment-markdown-hint').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.md-toolbar').forEach(el => el.style.display = 'none');
     document.getElementById('archiveCardBtn').style.display = 'none';
     document.getElementById('restoreCardBtn').style.display = 'none';
     document.getElementById('deleteCardBtn').style.display = 'none';
@@ -1579,6 +1643,14 @@ if (!boardId || !cardId) {
     if (!authed) return;
     setupEvents();
     setupDescriptionPreview();
+    setupMarkdownToolbar(
+      document.getElementById('cardDescription'),
+      document.getElementById('descToolbar')
+    );
+    setupMarkdownToolbar(
+      document.getElementById('commentInput'),
+      document.getElementById('commentToolbar')
+    );
     await loadCard();
     setupSSE();
     setupNotificationCheck();

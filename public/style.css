@@ -1891,12 +1891,12 @@ main#board {
   width: 100%;
   padding: 12px 14px;
   border: 1px solid var(--color-border);
-  border-radius: var(--radius-md);
+  border-radius: 0 0 var(--radius-md) var(--radius-md);
   font-size: 14px;
   font-family: inherit;
   line-height: 1.6;
   resize: vertical;
-  min-height: 120px;
+  min-height: 200px;
   background: var(--color-surface);
   color: var(--color-text);
   transition: border-color 0.15s;
@@ -1919,10 +1919,12 @@ main#board {
   width: 100%;
   padding: 12px 14px;
   border: none;
+  border-top: 1px solid var(--color-border);
   font-size: 14px;
   font-family: inherit;
   line-height: 1.5;
-  resize: none;
+  resize: vertical;
+  min-height: 90px;
   background: transparent;
   color: var(--color-text);
   outline: none;
@@ -2070,7 +2072,7 @@ main#board {
 .desc-preview-btn.active { background: var(--color-primary); color: #fff; border-color: var(--color-primary); }
 
 .card-page-desc-preview {
-  min-height: 80px;
+  min-height: 200px;
   padding: 12px 14px;
   border: 1px solid var(--color-border);
   border-radius: var(--radius-md);
@@ -2593,6 +2595,42 @@ body.bulk-mode-active #board {
 
 @media (prefers-color-scheme: dark) {
   .col-color-btn:hover { background: #334155; }
+}
+
+/* ---- Markdown Toolbar ---- */
+.md-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 4px 6px;
+  background: var(--color-surface-alt);
+  border: 1px solid var(--color-border);
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+}
+.md-btn {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 3px 8px;
+  font-size: 13px;
+  cursor: pointer;
+  color: var(--color-text);
+  line-height: 1.4;
+  transition: background 0.1s, border-color 0.1s;
+}
+.md-btn:hover {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+.md-btn:active { opacity: 0.7; }
+.md-toolbar + textarea {
+  border-top-left-radius: 0;
+  border-top-right-radius: 0;
+}
+@media (prefers-color-scheme: dark) {
+  .md-toolbar { background: #1e293b; border-color: #334155; }
+  .md-btn { color: #cbd5e1; }
+  .md-btn:hover { background: #334155; border-color: #475569; }
 }
 
 /* ---- Image Lightbox ---- */
