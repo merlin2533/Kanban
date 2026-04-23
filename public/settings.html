@@ -155,6 +155,17 @@
     </div>
 
     <div class="settings-card">
+      <h2>E-Mail-Adresse</h2>
+      <p style="color:#64748b;font-size:14px;margin-bottom:16px;">Wird für E-Mail-Benachrichtigungen verwendet.</p>
+      <div class="form-group">
+        <label for="emailInput">E-Mail-Adresse</label>
+        <input type="email" id="emailInput" placeholder="deine@email.de">
+      </div>
+      <button class="btn-primary" id="saveEmailBtn">Speichern</button>
+      <div id="emailResult" style="margin-top:12px;font-size:13px;"></div>
+    </div>
+
+    <div class="settings-card">
       <h2>Passwort aendern</h2>
       <div class="pw-status" id="passwordAge"></div>
       <form id="passwordForm">
@@ -205,8 +216,31 @@
           pwAge.textContent = 'Passwort ist aktuell.';
           pwAge.classList.add('ok');
         }
+
+        // Load email
+        const profile = await fetch('/api/me/profile').then(r => r.json()).catch(() => ({}));
+        if (profile.email) document.getElementById('emailInput').value = profile.email;
       } catch { window.location.href = '/login.html'; }
     }
+
+    document.getElementById('saveEmailBtn').addEventListener('click', async () => {
+      const result = document.getElementById('emailResult');
+      const email = document.getElementById('emailInput').value.trim();
+      const res = await fetch('/api/me/email', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({ email: email || null })
+      });
+      if (res.ok) {
+        result.textContent = 'E-Mail-Adresse gespeichert.';
+        result.style.color = '#16a34a';
+      } else {
+        const d = await res.json().catch(() => ({}));
+        result.textContent = d.error || 'Fehler beim Speichern.';
+        result.style.color = '#dc2626';
+      }
+      setTimeout(() => result.textContent = '', 3000);
+    });
 
     document.getElementById('passwordForm').addEventListener('submit', async (e) => {
       e.preventDefault();
