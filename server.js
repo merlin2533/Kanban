@@ -1648,18 +1648,53 @@ app.get('/api/me/profile', authMiddleware, (req, res) => {
 });
 
 // Admin: update any user's email
+app.patch('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const { username, email: emailAddr, password, is_admin } = req.body || {};
+  const updates = {};
+
+  if (username !== undefined) {
+    const u = String(username || '').trim();
+    if (!u || u.length > 100) return res.status(400).json({ error: 'Ungültiger Benutzername' });
+    updates.username = u;
+  }
+  if (emailAddr !== undefined) {
+    const e = String(emailAddr || '').trim();
+    if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return res.status(400).json({ error: 'Ungültige E-Mail-Adresse' });
+    updates.email = e || null;
+  }
+  if (password !== undefined && password) {
+    if (typeof password !== 'string' || password.length < 4) return res.status(400).json({ error: 'Passwort muss mindestens 4 Zeichen haben' });
+    updates.password = password;
+  }
+  if (is_admin !== undefined) {
+    // Prevent removing own admin rights
+    if (req.user.id === id && !is_admin) return res.status(400).json({ error: 'Eigene Admin-Rechte können nicht entzogen werden' });
+    updates.isAdmin = !!is_admin;
+  }
+  if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
+
+  try {
+    const user = db.updateUser(id, updates);
+    if (!user) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
+    const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
+    db.logAudit(req.user.id, 'user_updated', 'user', id, { changed: Object.keys(updates) }, ip);
+    res.json({ id: user.id, username: user.username, email: user.email || null, is_admin: user.is_admin });
+  } catch (err) {
+    if (err.code === 'USERNAME_TAKEN') return res.status(409).json({ error: err.message });
+    throw err;
+  }
+});
+
+// Legacy email-only endpoint (kept for compatibility)
 app.patch('/api/admin/users/:id/email', authMiddleware, requireAdmin, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const { email: emailAddr } = req.body || {};
-  if (emailAddr && typeof emailAddr === 'string' && emailAddr.trim()) {
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr.trim())) {
-      return res.status(400).json({ error: 'Invalid email address' });
-    }
-    db.setUserEmail(id, emailAddr.trim());
-  } else {
-    db.setUserEmail(id, null);
-  }
+  const e = String(emailAddr || '').trim();
+  if (e && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) return res.status(400).json({ error: 'Invalid email address' });
+  db.setUserEmail(id, e || null);
   res.json({ ok: true });
 });
 
