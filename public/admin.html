@@ -419,6 +419,7 @@
         <div class="form-row">
           <input type="text" class="form-input" id="newUsername" placeholder="Benutzername" required>
           <input type="password" class="form-input" id="newUserPassword" placeholder="Passwort (min. 6)" required>
+          <input type="email" class="form-input" id="newUserEmail" placeholder="E-Mail (optional)">
           <label class="checkbox-label"><input type="checkbox" id="newUserAdmin"> Admin</label>
           <button class="btn-primary" id="addUserBtn">Erstellen</button>
         </div>
@@ -695,6 +696,13 @@
         badge.textContent = user.is_admin ? 'Admin' : 'Benutzer';
         info.appendChild(badge);
 
+        if (user.email) {
+          const emailSpan = document.createElement('span');
+          emailSpan.style.cssText = 'font-size:12px;color:#64748b;margin-left:8px;';
+          emailSpan.textContent = user.email;
+          info.appendChild(emailSpan);
+        }
+
         row.appendChild(info);
 
         // Show board access for non-admin users
@@ -744,6 +752,7 @@
 
       const username = document.getElementById('newUsername').value.trim();
       const password = document.getElementById('newUserPassword').value;
+      const emailVal = document.getElementById('newUserEmail').value.trim();
       const isAdmin = document.getElementById('newUserAdmin').checked;
 
       if (!username || !password) { errEl.textContent = 'Benutzername und Passwort erforderlich.'; errEl.style.display = 'block'; return; }
@@ -751,7 +760,7 @@
       const res = await fetch('/api/admin/users', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
-        body: JSON.stringify({ username, password, is_admin: isAdmin })
+        body: JSON.stringify({ username, password, is_admin: isAdmin, email: emailVal || null })
       });
       if (res.ok) {
         const newUser = await res.json();
@@ -767,6 +776,7 @@
         }
         document.getElementById('newUsername').value = '';
         document.getElementById('newUserPassword').value = '';
+        document.getElementById('newUserEmail').value = '';
         document.getElementById('newUserAdmin').checked = false;
         const boardCount = checkedBoards.length;
         okEl.textContent = 'Benutzer "' + username + '" erstellt' + (boardCount > 0 ? ' und ' + boardCount + ' Board(s) zugewiesen' : '') + '!';

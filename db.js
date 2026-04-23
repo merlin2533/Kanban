@@ -523,7 +523,7 @@ function removeBoardMember(boardId, userId) {
 }
 
 function getUsers() {
-  return db.prepare('SELECT id, username, is_admin, password_changed_at, created_at FROM users').all();
+  return db.prepare('SELECT id, username, is_admin, email, password_changed_at, created_at FROM users').all();
 }
 
 function getUserById(id) {
@@ -1527,9 +1527,31 @@ function getNotificationPrefs(userId) {
   const prefs = {};
   for (const et of NOTIFICATION_EVENT_TYPES) {
     const row = rows.find(r => r.event_type === et);
-    prefs[et] = { email_enabled: row ? !!row.email_enabled : false };
+    prefs[et] = { email_enabled: row ? !!row.email_enabled : true };
   }
   return prefs;
+}
+
+function initUserNotificationPrefs(userId) {
+  const insert = db.prepare('INSERT OR IGNORE INTO notification_prefs (user_id, event_type, email_enabled) VALUES (?, ?, 1)');
+  for (const et of NOTIFICATION_EVENT_TYPES) {
+    insert.run(userId, et);
+  }
+}
+
+function getCardEmailContext(cardId) {
+  return db.prepare(`
+    SELECT c.id, c.text, c.description, c.due_date, c.priority,
+           col.title AS column_title, b.title AS board_title
+    FROM cards c
+    JOIN columns col ON c.column_id = col.id
+    JOIN boards b ON col.board_id = b.id
+    WHERE c.id = ?
+  `).get(cardId);
+}
+
+function getRecentComments(cardId, limit = 5) {
+  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at ASC LIMIT ?').all(cardId, limit);
 }
 
 function setNotificationPref(userId, eventType, emailEnabled) {
@@ -1635,7 +1657,8 @@ module.exports = {
   // Card Dependencies
   getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
   // Notification Preferences
-  getNotificationPrefs, setNotificationPref, NOTIFICATION_EVENT_TYPES,
+  getNotificationPrefs, setNotificationPref, initUserNotificationPrefs, NOTIFICATION_EVENT_TYPES,
+  getCardEmailContext, getRecentComments,
   // Due-date reminders
   getCardsDueSoon,
   // Audit Log

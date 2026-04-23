@@ -441,12 +441,18 @@ app.post('/api/admin/users', authMiddleware, requireAdmin, (req, res) => {
   if (!username) return res.status(400).json({ error: 'username required' });
   const password = req.body.password;
   if (!password || password.length < 6) return res.status(400).json({ error: 'password must be at least 6 chars' });
+  const emailAddr = req.body.email ? String(req.body.email).trim() : null;
+  if (emailAddr && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(emailAddr)) {
+    return res.status(400).json({ error: 'Ungültige E-Mail-Adresse' });
+  }
   try {
     const isAdmin = !!(req.body.is_admin);
     const user = db.createUser(username, password, isAdmin);
+    if (emailAddr) db.setUserEmail(user.id, emailAddr);
+    db.initUserNotificationPrefs(user.id);
     const ip = req.ip || req.connection.remoteAddress;
     db.logAudit(req.user.id, 'user_created', 'user', user.id, { username, is_admin: isAdmin }, ip);
-    res.status(201).json(user);
+    res.status(201).json({ ...user, email: emailAddr || null });
   } catch (e) {
     res.status(409).json({ error: 'Username already exists' });
   }
@@ -1040,14 +1046,16 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRat
   if (!comment) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'comment_created', cardId: id, user: author });
-  // Email notification to all assignees
+  // Email notification to all assignees and watchers
   const card = db.getDb().prepare('SELECT id, text FROM cards WHERE id = ?').get(id);
   if (card) {
     const assignees = db.getCardAssignees(id);
+    const watchers  = db.getCardWatchers(id);
+    const notifyUserIds = [...new Set([...assignees.map(a => a.id), ...watchers.map(w => w.id)])];
     email.notifyCommentAdded({
       card,
       comment: { text, author },
-      assigneeIds: assignees.map(a => a.id),
+      notifyUserIds,
     }).catch(err => console.error('[EMAIL] notifyCommentAdded error:', err));
   }
   // Auto-watch card when commenting
