@@ -534,6 +534,27 @@ function setUserEmail(userId, email) {
   db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email || null, userId);
 }
 
+function updateUser(userId, { username, email, password, isAdmin }) {
+  const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
+  if (!existing) return null;
+  if (username !== undefined) {
+    const conflict = db.prepare('SELECT id FROM users WHERE username = ? AND id != ?').get(username, userId);
+    if (conflict) throw Object.assign(new Error('Benutzername bereits vergeben'), { code: 'USERNAME_TAKEN' });
+    db.prepare('UPDATE users SET username = ? WHERE id = ?').run(username, userId);
+  }
+  if (email !== undefined) {
+    db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email || null, userId);
+  }
+  if (password !== undefined && password) {
+    const { hash, salt } = hashPassword(password);
+    db.prepare("UPDATE users SET password_hash = ?, password_salt = ?, password_changed_at = datetime('now') WHERE id = ?").run(hash, salt, userId);
+  }
+  if (isAdmin !== undefined) {
+    db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, userId);
+  }
+  return db.prepare('SELECT id, username, is_admin, email, created_at FROM users WHERE id = ?').get(userId);
+}
+
 function deleteUser(id) {
   const user = db.prepare('SELECT id, username FROM users WHERE id = ?').get(id);
   if (user) db.prepare('DELETE FROM users WHERE id = ?').run(id);
@@ -1704,7 +1725,7 @@ module.exports = {
   // Board access links
   createBoardAccessLink, getBoardAccessLinks, getBoardAccessLink, deleteBoardAccessLink,
   // User management
-  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, getUserById, setUserEmail, deleteUser,
+  getAllBoards, getPublicBoards, getBoardsForUser, getUsers, getUserById, setUserEmail, updateUser, deleteUser,
   // Board members
   getBoardMembers, isBoardMember, addBoardMember, removeBoardMember,
   // Webhooks
