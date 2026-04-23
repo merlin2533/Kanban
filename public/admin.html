@@ -379,6 +379,7 @@
       .api-key-display { background: #0f172a; color: #e2e8f0; border-color: #475569; }
       .btn-secondary { background: #334155; color: #cbd5e1; border-color: #475569; }
       .btn-secondary:hover { background: #475569; }
+      #editUserModal > div { background: #1e293b !important; color: #e2e8f0; }
     }
   </style>
 </head>
@@ -756,6 +757,12 @@
           }
           row.appendChild(boardsDiv);
         }
+
+        const editBtn = document.createElement('button');
+        editBtn.className = 'btn-secondary';
+        editBtn.textContent = 'Bearbeiten';
+        editBtn.onclick = () => openEditUserModal(user);
+        row.appendChild(editBtn);
 
         if (user.id !== currentUser.id) {
           const del = document.createElement('button');
@@ -1247,8 +1254,74 @@
       window.location.href = '/login.html';
     };
 
+    // --- Edit User Modal ---
+    let _editUserId = null;
+
+    function openEditUserModal(user) {
+      _editUserId = user.id;
+      document.getElementById('editUserName').textContent = user.username;
+      document.getElementById('editUserEmail').value = user.email || '';
+      document.getElementById('editUserError').style.display = 'none';
+      document.getElementById('editUserSuccess').style.display = 'none';
+      document.getElementById('editUserModal').style.display = 'flex';
+      setTimeout(() => document.getElementById('editUserEmail').focus(), 50);
+    }
+
+    document.getElementById('editUserCancelBtn').addEventListener('click', () => {
+      document.getElementById('editUserModal').style.display = 'none';
+    });
+
+    document.getElementById('editUserSaveBtn').addEventListener('click', async () => {
+      const email = document.getElementById('editUserEmail').value.trim();
+      const errEl = document.getElementById('editUserError');
+      const okEl = document.getElementById('editUserSuccess');
+      errEl.style.display = 'none'; okEl.style.display = 'none';
+
+      const res = await fetch(`/api/admin/users/${_editUserId}/email`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({ email: email || null })
+      });
+      if (res.ok) {
+        okEl.textContent = 'E-Mail gespeichert!';
+        okEl.style.display = 'block';
+        setTimeout(() => {
+          document.getElementById('editUserModal').style.display = 'none';
+          loadUsers();
+        }, 1200);
+      } else {
+        const d = await res.json().catch(() => ({}));
+        errEl.textContent = d.error || 'Fehler beim Speichern.';
+        errEl.style.display = 'block';
+      }
+    });
+
+    // Close on backdrop click
+    document.getElementById('editUserModal').addEventListener('click', (e) => {
+      if (e.target === document.getElementById('editUserModal'))
+        document.getElementById('editUserModal').style.display = 'none';
+    });
+
     init();
   </script>
   <script src="/pwa-install.js"></script>
+
+  <!-- Edit User Modal -->
+  <div id="editUserModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:10px;padding:28px 32px;min-width:340px;box-shadow:0 4px 24px rgba(0,0,0,.2);">
+      <h3 style="margin:0 0 20px;font-size:16px;">Benutzer bearbeiten: <span id="editUserName"></span></h3>
+      <div class="settings-group">
+        <label for="editUserEmail">E-Mail-Adresse</label>
+        <input type="email" class="form-input" id="editUserEmail" placeholder="benutzer@beispiel.de" style="width:100%;">
+        <div class="hint">Wird für E-Mail-Benachrichtigungen verwendet.</div>
+      </div>
+      <div class="form-error" id="editUserError" style="display:none;margin-top:8px;"></div>
+      <div class="form-success" id="editUserSuccess" style="display:none;margin-top:8px;"></div>
+      <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;">
+        <button class="btn-secondary" id="editUserCancelBtn">Abbrechen</button>
+        <button class="btn-primary" id="editUserSaveBtn">Speichern</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
