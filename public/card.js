@@ -181,6 +181,20 @@ function esc(str) {
   return d.innerHTML;
 }
 
+// --- @Mention highlighting ---
+// First escapes plain text, then wraps @username patterns in a span.
+// When used after renderMarkdown, pass the raw text and combine both steps.
+function renderMentions(text) {
+  const escaped = esc(text);
+  return escaped.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+}
+
+// Render comment text: apply markdown then highlight @mentions.
+function renderCommentText(text) {
+  // renderMarkdown already HTML-escapes the input; apply mention spans afterwards.
+  return renderMarkdown(text).replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+}
+
 function formatTime(iso) {
   const d = new Date(/Z$|[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z');
   const now = new Date();
@@ -430,7 +444,7 @@ function renderComment(comment) {
 
   const text = document.createElement('div');
   text.className = 'comment-text';
-  text.innerHTML = renderMarkdown(comment.text);
+  text.innerHTML = renderCommentText(comment.text);
 
   const footer = document.createElement('div');
   footer.className = 'comment-footer';
@@ -997,6 +1011,27 @@ function setupSSE() {
       if (event.type !== 'update') return;
       // A new card being created doesn't affect the current card page
       if (event.action === 'card_created') return;
+      // Echtzeit-Aktivitäts-Feed: bei neuem Kommentar Aktivität nachladen und Flash-Effekt anzeigen
+      if (event.action === 'comment_created' && event.cardId === cardId) {
+        // Aktivitäts-Feed neu laden wenn er sichtbar ist
+        const activityList = document.getElementById('activityList');
+        if (activityList && !activityList.classList.contains('hidden')) {
+          activityLoaded = false;
+          api(`/api/cards/${cardId}/activity`).then(activities => {
+            renderActivity(activities, activityList);
+            activityLoaded = true;
+          }).catch(() => {});
+        } else {
+          // Flag zurücksetzen damit beim nächsten Öffnen frisch geladen wird
+          activityLoaded = false;
+        }
+        // Flash-Effekt auf Aktivitätsbereich
+        if (activityList) {
+          activityList.classList.add('activity-flash');
+          setTimeout(() => activityList.classList.remove('activity-flash'), 600);
+        }
+        return;
+      }
       // Reload if this card or the board changed
       if (!event.cardId || event.cardId === cardId || event.action === 'bulk_move' || event.action === 'bulk_archive') {
         loadCard();
@@ -1149,6 +1184,41 @@ function setupNotificationCheck() {
   }
 }
 
+// --- Tipp-Indikator ---
+function setupTypingIndicator() {
+  const commentForm = document.querySelector('.card-page-comment-form');
+  if (!commentForm) return;
+
+  // Indikator-Element einfügen
+  let indicator = document.getElementById('typingIndicator');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.id = 'typingIndicator';
+    indicator.className = 'typing-indicator hidden';
+    commentForm.appendChild(indicator);
+  }
+
+  const TYPING_TIMEOUT = 3000; // 3 Sekunden
+
+  setInterval(() => {
+    const key = 'typing_' + boardId + '_' + cardId;
+    const val = lsGet(key);
+    if (!val) { indicator.classList.add('hidden'); return; }
+    const colonIdx = val.indexOf(':');
+    const typingUser = val.substring(0, colonIdx);
+    const ts = parseInt(val.substring(colonIdx + 1), 10);
+    const myUsername = getCurrentUsername();
+    // Eigene Einträge ignorieren
+    if (typingUser === myUsername) { indicator.classList.add('hidden'); return; }
+    if (Date.now() - ts < TYPING_TIMEOUT) {
+      indicator.textContent = typingUser + ' tippt gerade...';
+      indicator.classList.remove('hidden');
+    } else {
+      indicator.classList.add('hidden');
+    }
+  }, 2000);
+}
+
 // --- Setup event listeners ---
 function setupEvents() {
   // Title save on blur
@@ -1285,6 +1355,21 @@ function setupEvents() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }
   };
   commentInput.addEventListener('paste', (e) => handleImagePaste(e, commentInput));
+
+  // Tipp-Indikator: bei Eingabe Typing-Signal in localStorage setzen (debounced)
+  let typingDebounceTimer = null;
+  commentInput.addEventListener('input', () => {
+    clearTimeout(typingDebounceTimer);
+    typingDebounceTimer = setTimeout(() => {
+      const username = getCurrentUsername();
+      if (username) {
+        lsSet('typing_' + boardId + '_' + cardId, username + ':' + Date.now());
+      }
+    }, 500);
+  });
+
+  // Tipp-Indikator alle 2 Sekunden prüfen
+  setupTypingIndicator();
 
   // Duplicate
   document.getElementById('duplicateCardBtn').onclick = duplicateCard;
