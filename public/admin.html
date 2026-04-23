@@ -685,12 +685,13 @@
 
       // Build user→boards mapping from all board member lists
       const userBoardsMap = {};
-      if (allBoards.length > 0) {
+      if (Array.isArray(allBoards) && allBoards.length > 0) {
         const memberResults = await Promise.all(
-          allBoards.map(b => fetch('/api/boards/' + b.id + '/members').then(r => r.json()))
+          allBoards.map(b => fetch('/api/boards/' + b.id + '/members').then(r => r.json()).catch(() => []))
         );
         allBoards.forEach((board, i) => {
-          for (const m of memberResults[i]) {
+          const members = Array.isArray(memberResults[i]) ? memberResults[i] : [];
+          for (const m of members) {
             if (!m.is_admin) {
               if (!userBoardsMap[m.id]) userBoardsMap[m.id] = [];
               userBoardsMap[m.id].push(board.title);
@@ -702,7 +703,7 @@
       const list = document.getElementById('userList');
       list.innerHTML = '';
 
-      if (users.length === 0) {
+      if (!Array.isArray(users) || users.length === 0) {
         list.innerHTML = '<div class="empty-state">Keine Benutzer vorhanden.</div>';
         return;
       }

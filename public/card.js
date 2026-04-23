@@ -723,22 +723,32 @@ async function loadDependencies() {
 function renderDependencies(deps) {
   if (!deps) deps = { blocking: [], blocked: [] };
   let section = document.getElementById('dependenciesSection');
+  const wasCollapsed = section ? section.classList.contains('collapsed') : true;
   if (!section) {
-    section = document.createElement('div');
+    section = document.createElement('section');
     section.id = 'dependenciesSection';
-    section.className = 'card-section';
+    section.className = 'sidebar-section sidebar-collapsible collapsed';
     const assigneesSection = document.getElementById('assigneesSection') || document.querySelector('.assignees-section');
     if (assigneesSection) assigneesSection.after(section);
     else document.querySelector('.card-detail')?.appendChild(section);
   }
 
-  section.innerHTML = `<div class="card-field-label">Abhängigkeiten</div>`;
+  section.innerHTML = `
+    <h3 class="sidebar-section-label sidebar-collapsible-toggle">Abhängigkeiten <span class="sidebar-collapse-icon">&#9660;</span></h3>
+    <div class="sidebar-collapsible-body"></div>
+  `;
+  section.classList.toggle('collapsed', wasCollapsed);
+  const toggle = section.querySelector('.sidebar-collapsible-toggle');
+  toggle.style.cursor = 'pointer';
+  toggle.addEventListener('click', () => section.classList.toggle('collapsed'));
+
+  const body = section.querySelector('.sidebar-collapsible-body');
 
   if (deps.blocking.length === 0 && !canEdit()) {
     const empty = document.createElement('p');
     empty.style.cssText = 'color:#94a3b8;font-size:13px;margin:4px 0;';
     empty.textContent = 'Keine Abhängigkeiten';
-    section.appendChild(empty);
+    body.appendChild(empty);
     return;
   }
 
@@ -761,7 +771,7 @@ function renderDependencies(deps) {
       }
       blockingDiv.appendChild(item);
     }
-    section.appendChild(blockingDiv);
+    body.appendChild(blockingDiv);
   }
 
   if (canEdit()) {
@@ -771,7 +781,7 @@ function renderDependencies(deps) {
       <input type="number" id="depCardIdInput" placeholder="Karten-ID eingeben..." style="padding:4px 8px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;width:160px;">
       <button id="addDepBtn" class="btn-secondary" style="margin-left:4px;">+ Blockiert von</button>
     `;
-    section.appendChild(addDiv);
+    body.appendChild(addDiv);
     document.getElementById('addDepBtn').onclick = async () => {
       const blockingId = parseInt(document.getElementById('depCardIdInput').value);
       if (isNaN(blockingId) || blockingId <= 0) return;
