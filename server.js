@@ -1164,7 +1164,7 @@ app.patch('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) =>
   if (!existing) return res.status(404).json({ error: 'Comment not found' });
   const requestUser = getRequestUser(req);
   const isAdmin = req.user && req.user.is_admin;
-  if (!isAdmin && existing.author !== requestUser) {
+  if (!isAdmin && (!existing.author || !requestUser || existing.author !== requestUser)) {
     return res.status(403).json({ error: 'Nur eigene Kommentare können bearbeitet werden' });
   }
   if (!isAdmin) {
@@ -1186,7 +1186,7 @@ app.delete('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) =
   if (!existing) return res.status(404).json({ error: 'Comment not found' });
   const requestUser = getRequestUser(req);
   const isAdmin = req.user && req.user.is_admin;
-  if (!isAdmin && existing.author !== requestUser) {
+  if (!isAdmin && (!existing.author || !requestUser || existing.author !== requestUser)) {
     return res.status(403).json({ error: 'Nur eigene Kommentare können gelöscht werden' });
   }
   if (!isAdmin) {
