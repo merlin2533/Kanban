@@ -1334,8 +1334,12 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
   if (!att.file_data) return res.status(404).json({ error: 'Attachment data not found' });
   const safeFilename = path.basename(att.filename).replace(/"/g, '\\"');
-  res.setHeader('Content-Type', att.mimetype || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+  const mime = att.mimetype || 'application/octet-stream';
+  // Images and PDFs are served inline so the browser can display them directly
+  const inlineTypes = ['image/', 'application/pdf'];
+  const disposition = inlineTypes.some(t => mime.startsWith(t)) ? 'inline' : 'attachment';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Disposition', `${disposition}; filename="${safeFilename}"`);
   res.setHeader('Content-Length', att.file_data.length);
   res.send(att.file_data);
 });

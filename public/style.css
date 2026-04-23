@@ -2594,3 +2594,38 @@ body.bulk-mode-active #board {
 @media (prefers-color-scheme: dark) {
   .col-color-btn:hover { background: #334155; }
 }
+
+/* ---- Image Lightbox ---- */
+.lightbox-overlay {
+  position: fixed; inset: 0; z-index: 9999;
+  background: rgba(0,0,0,0); display: flex;
+  align-items: center; justify-content: center;
+  backdrop-filter: blur(0); transition: background 0.2s, backdrop-filter 0.2s;
+}
+.lightbox-overlay.lightbox-visible {
+  background: rgba(0,0,0,.85);
+  backdrop-filter: blur(4px);
+}
+.lightbox-inner {
+  max-width: 90vw; max-height: 90vh;
+  display: flex; flex-direction: column;
+  background: #1e293b; border-radius: 10px;
+  overflow: hidden; box-shadow: 0 8px 40px rgba(0,0,0,.6);
+}
+.lightbox-img {
+  max-width: 90vw; max-height: 75vh;
+  object-fit: contain; display: block;
+}
+.lightbox-footer {
+  display: flex; align-items: center; gap: 12px;
+  padding: 10px 16px; background: #0f172a;
+}
+.lightbox-name { color: #cbd5e1; font-size: 13px; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lightbox-download { color: #60a5fa; font-size: 13px; text-decoration: none; white-space: nowrap; }
+.lightbox-download:hover { text-decoration: underline; }
+.lightbox-close {
+  background: none; border: none; color: #94a3b8;
+  font-size: 20px; cursor: pointer; padding: 2px 6px; border-radius: 4px;
+  line-height: 1;
+}
+.lightbox-close:hover { background: #334155; color: #fff; }

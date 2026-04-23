@@ -891,6 +891,35 @@ async function reloadChecklist() {
 }
 
 // --- Attachments ---
+function openImageLightbox(src, filename) {
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  const inner = document.createElement('div');
+  inner.className = 'lightbox-inner';
+  const img = document.createElement('img');
+  img.src = src; img.className = 'lightbox-img'; img.alt = filename;
+  const footer = document.createElement('div');
+  footer.className = 'lightbox-footer';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'lightbox-name'; nameEl.textContent = filename;
+  const dlLink = document.createElement('a');
+  dlLink.href = src; dlLink.download = filename;
+  dlLink.className = 'lightbox-download'; dlLink.textContent = '⬇ Herunterladen';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'lightbox-close'; closeBtn.textContent = '\xD7';
+  closeBtn.setAttribute('aria-label', 'Schlie\xDFen');
+  closeBtn.onclick = () => overlay.remove();
+  footer.append(nameEl, dlLink, closeBtn);
+  inner.append(img, footer);
+  overlay.appendChild(inner);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
+  });
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('lightbox-visible'));
+}
+
 function renderAttachments(attachments) {
   const container = document.getElementById('attachmentsList');
   container.innerHTML = '';
@@ -900,8 +929,11 @@ function renderAttachments(attachments) {
     if (att.mimetype && att.mimetype.startsWith('image/')) {
       const thumb = document.createElement('img');
       thumb.className = 'attachment-thumb';
-      thumb.src = '/uploads/' + att.filepath.split(/[/\\]/).pop();
+      thumb.src = `/api/attachments/${att.id}`;
       thumb.alt = att.filename;
+      thumb.loading = 'lazy';
+      thumb.style.cursor = 'zoom-in';
+      thumb.onclick = () => openImageLightbox(`/api/attachments/${att.id}`, att.filename);
       item.appendChild(thumb);
     } else {
       const icon = document.createElement('div');
@@ -918,11 +950,18 @@ function renderAttachments(attachments) {
     }
     const info = document.createElement('div');
     info.className = 'attachment-info';
+    const isImage = att.mimetype && att.mimetype.startsWith('image/');
     const name = document.createElement('a');
     name.className = 'attachment-name';
-    name.href = `/api/attachments/${att.id}`;
+    if (isImage) {
+      name.href = '#';
+      name.onclick = (e) => { e.preventDefault(); openImageLightbox(`/api/attachments/${att.id}`, att.filename); };
+    } else {
+      name.href = `/api/attachments/${att.id}`;
+      name.target = '_blank';
+      name.rel = 'noopener';
+    }
     name.textContent = att.filename;
-    name.target = '_blank';
     const size = document.createElement('div');
     size.className = 'attachment-size';
     size.textContent = formatSize(att.size);
