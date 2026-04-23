@@ -479,6 +479,37 @@
       </div>
 
       <div class="admin-card">
+        <h2>Wochenübersicht (Digest)</h2>
+        <div class="settings-group">
+          <label class="checkbox-label">
+            <input type="checkbox" id="sWeeklyDigestEnabled">
+            Wöchentliche Zusammenfassung per E-Mail aktivieren
+          </label>
+          <div class="hint">Jeder Benutzer mit E-Mail-Adresse erhält einmal pro Woche eine Übersicht über fällige Karten und neue Kommentare.</div>
+        </div>
+        <div class="settings-group">
+          <label for="sWeeklyDigestDay">Versandtag</label>
+          <select class="form-input" id="sWeeklyDigestDay" style="max-width:160px;">
+            <option value="0">Sonntag</option>
+            <option value="1">Montag</option>
+            <option value="2">Dienstag</option>
+            <option value="3">Mittwoch</option>
+            <option value="4">Donnerstag</option>
+            <option value="5">Freitag</option>
+            <option value="6">Samstag</option>
+          </select>
+        </div>
+        <div class="settings-group">
+          <label for="sWeeklyDigestHour">Versandzeit (Stunde)</label>
+          <input type="number" class="form-input" id="sWeeklyDigestHour" min="0" max="23" style="max-width:80px;">
+          <div class="hint">0–23 Uhr (Serverzeit)</div>
+        </div>
+        <button class="btn-primary" id="saveWeeklyDigestBtn">Speichern</button>
+        <div class="form-error" id="weeklyDigestError"></div>
+        <div class="form-success" id="weeklyDigestSuccess"></div>
+      </div>
+
+      <div class="admin-card">
         <h2>Externer API-Key</h2>
         <p style="color:#64748b;font-size:13px;margin-bottom:16px;">
           Wird von externen Anwendungen genutzt, um Tickets per API zu erstellen.<br>
@@ -976,6 +1007,9 @@
         document.getElementById('sEmailFrom').value = s.email_from || '';
         document.getElementById('sReminderHours').value = s.reminder_interval_hours || '24';
         document.getElementById('sEscalationDays').value = s.reminder_escalation_days || '3';
+        document.getElementById('sWeeklyDigestEnabled').checked = (s.weekly_digest_enabled || '1') !== '0';
+        document.getElementById('sWeeklyDigestDay').value   = s.weekly_digest_day  || '1';
+        document.getElementById('sWeeklyDigestHour').value  = s.weekly_digest_hour || '8';
         _apiKeyValue = s.api_key || '';
         _apiKeyVisible = false;
         document.getElementById('apiKeyDisplay').textContent = '••••••••••••••••••••••••';
@@ -1009,6 +1043,23 @@
         body: JSON.stringify({
           reminder_interval_hours: document.getElementById('sReminderHours').value,
           reminder_escalation_days: document.getElementById('sEscalationDays').value,
+        })
+      });
+      if (res.ok) { okEl.textContent = 'Gespeichert!'; okEl.style.display = 'block'; setTimeout(() => okEl.style.display = 'none', 3000); }
+      else { errEl.textContent = 'Fehler beim Speichern.'; errEl.style.display = 'block'; }
+    });
+
+    document.getElementById('saveWeeklyDigestBtn').addEventListener('click', async () => {
+      const errEl = document.getElementById('weeklyDigestError');
+      const okEl  = document.getElementById('weeklyDigestSuccess');
+      errEl.style.display = 'none'; okEl.style.display = 'none';
+      const res = await fetch('/api/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({
+          weekly_digest_enabled: document.getElementById('sWeeklyDigestEnabled').checked ? '1' : '0',
+          weekly_digest_day:     document.getElementById('sWeeklyDigestDay').value,
+          weekly_digest_hour:    document.getElementById('sWeeklyDigestHour').value,
         })
       });
       if (res.ok) { okEl.textContent = 'Gespeichert!'; okEl.style.display = 'block'; setTimeout(() => okEl.style.display = 'none', 3000); }

@@ -52,17 +52,22 @@ let activeDueFilter = lsGet('kanban_due_filter_' + boardId) || null;
 
 // --- Undo Stack ---
 const undoStack = [];
+const redoStack = [];
 const MAX_UNDO = 20;
 
 function pushUndo(action) {
   undoStack.push(action);
   if (undoStack.length > MAX_UNDO) undoStack.shift();
-  updateUndoBtn();
+  // New user action invalidates any pending redo
+  redoStack.length = 0;
+  updateUndoRedoBtns();
 }
 
-function updateUndoBtn() {
-  const btn = document.getElementById('undoBtn');
-  if (btn) btn.disabled = undoStack.length === 0;
+function updateUndoRedoBtns() {
+  const undoBtn = document.getElementById('undoBtn');
+  const redoBtn = document.getElementById('redoBtn');
+  if (undoBtn) undoBtn.disabled = undoStack.length === 0;
+  if (redoBtn) redoBtn.disabled = redoStack.length === 0;
 }
 
 async function performUndo() {
@@ -70,11 +75,25 @@ async function performUndo() {
   const action = undoStack.pop();
   try {
     await action.undo();
+    redoStack.push(action);
     loadBoard();
   } catch (e) {
     showError('Undo fehlgeschlagen: ' + e.message);
   }
-  updateUndoBtn();
+  updateUndoRedoBtns();
+}
+
+async function performRedo() {
+  if (redoStack.length === 0) return;
+  const action = redoStack.pop();
+  try {
+    await action.redo();
+    undoStack.push(action);
+    loadBoard();
+  } catch (e) {
+    showError('Redo fehlgeschlagen: ' + e.message);
+  }
+  updateUndoRedoBtns();
 }
 
 // Auth check - before DOMContentLoaded
@@ -649,6 +668,16 @@ document.addEventListener('DOMContentLoaded', async () => {
   undoBtn.onclick = performUndo;
   document.querySelector('.header-actions').insertBefore(undoBtn, document.getElementById('activityBtn'));
 
+  // Redo button
+  const redoBtn = document.createElement('button');
+  redoBtn.className = 'icon-btn';
+  redoBtn.id = 'redoBtn';
+  redoBtn.innerHTML = '&#8631;'; // redo arrow
+  redoBtn.title = 'Wiederholen (Ctrl+Y)';
+  redoBtn.disabled = true;
+  redoBtn.onclick = performRedo;
+  document.querySelector('.header-actions').insertBefore(redoBtn, document.getElementById('activityBtn'));
+
   // Share/copy link button
   const shareBtn = document.createElement('button');
   shareBtn.className = 'icon-btn';
@@ -1007,9 +1036,13 @@ document.addEventListener('DOMContentLoaded', async () => {
       showShortcutsHelp();
       e.preventDefault();
     }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !e.shiftKey) {
       e.preventDefault();
       performUndo();
+    }
+    if ((e.ctrlKey || e.metaKey) && (e.key === 'y' || (e.key === 'z' && e.shiftKey))) {
+      e.preventDefault();
+      performRedo();
     }
     if ((e.ctrlKey || e.metaKey) && e.key === 'm') {
       if (canEdit()) {
@@ -1098,7 +1131,7 @@ function showShortcutsHelp() {
   const modal = document.createElement('div');
   modal.id = 'shortcutsModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;z-index:9999;';
-  modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.2);"><h3 style="margin:0 0 16px;font-size:16px;">Tastaturkürzel</h3><table style="border-collapse:collapse;font-size:14px;"><tr><td style="padding:4px 16px 4px 0;"><kbd>n</kbd></td><td>Neue Karte</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>f</kbd></td><td>Suche</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+Z</kbd></td><td>Rückgängig</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+M</kbd></td><td>Mehrfachauswahl</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Esc</kbd></td><td>Schließen</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>?</kbd></td><td>Diese Hilfe</td></tr></table><button onclick="document.getElementById(\'shortcutsModal\').remove()" style="margin-top:16px;padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Schließen</button></div>';
+  modal.innerHTML = '<div style="background:#fff;border-radius:12px;padding:24px 32px;min-width:260px;box-shadow:0 8px 32px rgba(0,0,0,0.2);"><h3 style="margin:0 0 16px;font-size:16px;">Tastaturkürzel</h3><table style="border-collapse:collapse;font-size:14px;"><tr><td style="padding:4px 16px 4px 0;"><kbd>n</kbd></td><td>Neue Karte</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>f</kbd></td><td>Suche</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+Z</kbd></td><td>Rückgängig</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+Y</kbd></td><td>Wiederholen</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Ctrl+M</kbd></td><td>Mehrfachauswahl</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>Esc</kbd></td><td>Schließen</td></tr><tr><td style="padding:4px 16px 4px 0;"><kbd>?</kbd></td><td>Diese Hilfe</td></tr></table><button onclick="document.getElementById(\'shortcutsModal\').remove()" style="margin-top:16px;padding:6px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Schließen</button></div>';
   modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
   document.body.appendChild(modal);
 }
@@ -1296,10 +1329,15 @@ function createColumnEl(col) {
     if (!confirm(`Spalte "${col.title}" mit allen Karten löschen?`)) return;
     try {
       await api(`/api/columns/${col.id}`, 'DELETE');
+      let _restoredColId = null;
       pushUndo({
         description: `Spalte "${col.title}" gelöscht`,
         undo: async () => {
-          await api(`/api/boards/${boardId}/columns`, 'POST', { title: col.title });
+          const newCol = await api(`/api/boards/${boardId}/columns`, 'POST', { title: col.title });
+          _restoredColId = newCol && newCol.id;
+        },
+        redo: async () => {
+          if (_restoredColId) await api(`/api/columns/${_restoredColId}`, 'DELETE');
         }
       });
       loadBoard();
@@ -1814,11 +1852,21 @@ async function handleDrop(e) {
     position = cards.length;
   }
 
+  const originalCard = findCard(draggedCardId);
+  const origColId  = originalCard ? originalCard.column_id : null;
+  const origPos    = originalCard ? originalCard.position  : null;
+  const cid        = draggedCardId;
+  const newColId   = Number(targetColumnId);
+
   try {
-    await api(`/api/cards/${draggedCardId}/move`, 'PUT', {
-      columnId: Number(targetColumnId),
-      position
-    });
+    await api(`/api/cards/${cid}/move`, 'PUT', { columnId: newColId, position });
+    if (origColId !== null) {
+      pushUndo({
+        description: `Karte verschoben`,
+        undo: async () => { await api(`/api/cards/${cid}/move`, 'PUT', { columnId: origColId, position: origPos }); },
+        redo: async () => { await api(`/api/cards/${cid}/move`, 'PUT', { columnId: newColId, position }); }
+      });
+    }
     loadBoard();
   } catch (e) {
     showError(e.message);
@@ -1890,13 +1938,13 @@ function setupModal() {
     if (!currentCardId) return;
     try {
       const cardData = findCard(currentCardId);
-      await api(`/api/cards/${currentCardId}/archive`, 'PUT');
+      const cid = currentCardId;
+      await api(`/api/cards/${cid}/archive`, 'PUT');
       if (cardData) {
         pushUndo({
           description: `Karte "${cardData.text}" archiviert`,
-          undo: async () => {
-            await api(`/api/cards/${cardData.id}/restore`, 'PUT');
-          }
+          undo: async () => { await api(`/api/cards/${cid}/restore`, 'PUT'); },
+          redo: async () => { await api(`/api/cards/${cid}/archive`, 'PUT'); }
         });
       }
       closeModal();
@@ -1924,10 +1972,15 @@ function setupModal() {
     try {
       await api(`/api/cards/${currentCardId}`, 'DELETE');
       if (cardData) {
+        let _restoredCardId = null;
         pushUndo({
           description: `Karte "${cardData.text}" gelöscht`,
           undo: async () => {
-            await api(`/api/columns/${cardData.column_id}/cards`, 'POST', { text: cardData.text });
+            const newCard = await api(`/api/columns/${cardData.column_id}/cards`, 'POST', { text: cardData.text });
+            _restoredCardId = newCard && newCard.id;
+          },
+          redo: async () => {
+            if (_restoredCardId) await api(`/api/cards/${_restoredCardId}`, 'DELETE');
           }
         });
       }

@@ -1515,11 +1515,71 @@ function getCardsDueSoon(withinHours) {
   `).all(nowIso, cutoffIso);
 }
 
+// Returns all data needed for the weekly digest email, grouped by user.
+// Each entry: { user_id, username, email, cards: [...] }
+// where each card has: { id, text, board_title, column_title, due_date, priority,
+//                        is_overdue, is_due_this_week, new_comment_count }
+function getWeeklyDigestData() {
+  const rows = db.prepare(`
+    SELECT
+      u.id      AS user_id,
+      u.username,
+      u.email,
+      c.id      AS card_id,
+      c.text    AS card_text,
+      c.due_date,
+      c.priority,
+      b.title   AS board_title,
+      col.title AS column_title,
+      (SELECT COUNT(*) FROM comments cm
+         WHERE cm.card_id = c.id
+           AND datetime(cm.created_at) > datetime('now', '-7 days')) AS new_comment_count,
+      CASE WHEN c.due_date IS NOT NULL AND c.due_date < date('now')
+           THEN 1 ELSE 0 END AS is_overdue,
+      CASE WHEN c.due_date IS NOT NULL
+                AND c.due_date >= date('now')
+                AND c.due_date <= date('now', '+7 days')
+           THEN 1 ELSE 0 END AS is_due_this_week
+    FROM users u
+    JOIN (
+      SELECT user_id, card_id FROM card_assignees
+      UNION
+      SELECT user_id, card_id FROM card_watchers
+    ) uc ON uc.user_id = u.id
+    JOIN cards c   ON c.id = uc.card_id AND c.archived = 0
+    JOIN columns col ON col.id = c.column_id
+    JOIN boards b  ON b.id  = col.board_id
+    WHERE u.email IS NOT NULL
+    ORDER BY u.id, c.due_date ASC NULLS LAST
+  `).all();
+
+  // Group by user
+  const byUser = new Map();
+  for (const row of rows) {
+    if (!byUser.has(row.user_id)) {
+      byUser.set(row.user_id, { user_id: row.user_id, username: row.username, email: row.email, cards: [] });
+    }
+    byUser.get(row.user_id).cards.push({
+      id:               row.card_id,
+      text:             row.card_text,
+      board_title:      row.board_title,
+      column_title:     row.column_title,
+      due_date:         row.due_date,
+      priority:         row.priority,
+      is_overdue:       !!row.is_overdue,
+      is_due_this_week: !!row.is_due_this_week,
+      new_comment_count: row.new_comment_count,
+    });
+  }
+  return [...byUser.values()];
+}
+
 // --- Notification Preferences ---
 
 const NOTIFICATION_EVENT_TYPES = [
   'card_created', 'card_assigned', 'card_due_soon',
-  'comment_added', 'card_archived', 'board_updated', 'card_moved'
+  'comment_added', 'card_archived', 'board_updated', 'card_moved',
+  'weekly_digest'
 ];
 
 function getNotificationPrefs(userId) {
@@ -1659,8 +1719,8 @@ module.exports = {
   // Notification Preferences
   getNotificationPrefs, setNotificationPref, initUserNotificationPrefs, NOTIFICATION_EVENT_TYPES,
   getCardEmailContext, getRecentComments,
-  // Due-date reminders
-  getCardsDueSoon,
+  // Due-date reminders & weekly digest
+  getCardsDueSoon, getWeeklyDigestData,
   // Audit Log
   logAudit, getAuditLog, AUDIT_ACTION_TYPES,
   // Card Watchers

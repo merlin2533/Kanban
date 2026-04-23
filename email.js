@@ -288,10 +288,107 @@ function escHtml(str) {
     .replace(/"/g, '&quot;');
 }
 
+// ---------------------------------------------------------------------------
+// notifyWeeklyDigest
+//   Called by the weekly digest job.
+//   recipients – array from db.getWeeklyDigestData():
+//     { user_id, username, email, cards: [...] }
+// ---------------------------------------------------------------------------
+async function notifyWeeklyDigest(recipients) {
+  for (const recipient of recipients) {
+    if (!isEnabled(recipient.user_id, 'weekly_digest')) continue;
+    if (!recipient.email) continue;
+    if (!recipient.cards || recipient.cards.length === 0) continue;
+
+    const overdue        = recipient.cards.filter(c => c.is_overdue);
+    const dueThisWeek    = recipient.cards.filter(c => c.is_due_this_week);
+    const withNewComments = recipient.cards.filter(c => c.new_comment_count > 0);
+
+    // Only send if there's something worth reporting
+    if (overdue.length === 0 && dueThisWeek.length === 0 && withNewComments.length === 0) continue;
+
+    const html = buildWeeklyDigestHtml({ recipient, overdue, dueThisWeek, withNewComments });
+    const text = buildWeeklyDigestText({ recipient, overdue, dueThisWeek, withNewComments });
+
+    const from = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    await sendEmail({
+      to:      recipient.email,
+      subject: `Wochenzusammenfassung Kanban – ${from}`,
+      html,
+      text,
+    });
+  }
+}
+
+function buildWeeklyDigestHtml({ recipient, overdue, dueThisWeek, withNewComments }) {
+  const priorityColors = { high: '#dc2626', medium: '#f59e0b', low: '#22c55e' };
+
+  const cardRow = (c) => {
+    const pColor = c.priority ? (priorityColors[c.priority] || '#94a3b8') : '#94a3b8';
+    const due    = c.due_date ? `<span style="font-size:11px;color:#64748b;">📅 ${escHtml(c.due_date)}</span>` : '';
+    const badge  = c.new_comment_count > 0 ? `<span style="font-size:11px;background:#eff6ff;color:#2563eb;border-radius:4px;padding:1px 5px;">💬 ${c.new_comment_count} neu</span>` : '';
+    return `<tr>
+      <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;vertical-align:top;">
+        <span style="display:inline-block;width:3px;height:14px;background:${pColor};border-radius:2px;margin-right:8px;vertical-align:middle;"></span>
+        <strong style="font-size:13px;">${escHtml(c.text)}</strong>
+        <div style="font-size:11px;color:#94a3b8;margin-top:2px;">${escHtml(c.board_title)} › ${escHtml(c.column_title)}</div>
+      </td>
+      <td style="padding:6px 0 6px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top;white-space:nowrap;">${due} ${badge}</td>
+    </tr>`;
+  };
+
+  const section = (title, color, cards) => {
+    if (!cards.length) return '';
+    return `
+      <div style="margin-bottom:24px;">
+        <h3 style="font-size:13px;color:${color};margin:0 0 8px 0;text-transform:uppercase;letter-spacing:.05em;">${title} (${cards.length})</h3>
+        <table style="width:100%;border-collapse:collapse;">${cards.map(cardRow).join('')}</table>
+      </div>`;
+  };
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;margin:0;padding:24px;">
+  <div style="max-width:620px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1);">
+    <div style="background:#2563eb;padding:20px 24px;">
+      <span style="color:#fff;font-size:18px;font-weight:700;">📋 Kanban – Wochenzusammenfassung</span>
+    </div>
+    <div style="padding:24px;">
+      <p style="margin:0 0 20px;color:#374151;font-size:14px;">
+        Hallo <strong>${escHtml(recipient.username)}</strong>, hier ist deine Übersicht der Woche:
+      </p>
+      ${section('🔴 Überfällig', '#dc2626', overdue)}
+      ${section('📅 Diese Woche fällig', '#f59e0b', dueThisWeek)}
+      ${section('💬 Neue Kommentare', '#2563eb', withNewComments)}
+    </div>
+    <div style="background:#f8fafc;padding:12px 24px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;">
+      Wochenzusammenfassung deines Kanban-Systems. Einstellungen unter Benachrichtigungen.
+    </div>
+  </div>
+</body></html>`;
+}
+
+function buildWeeklyDigestText({ recipient, overdue, dueThisWeek, withNewComments }) {
+  const lines = [`Hallo ${recipient.username}, deine Kanban-Wochenzusammenfassung:`, ''];
+  const block = (title, cards) => {
+    if (!cards.length) return;
+    lines.push(`--- ${title} ---`);
+    for (const c of cards) {
+      lines.push(`  • ${c.text} [${c.board_title} › ${c.column_title}]${c.due_date ? ` (${c.due_date})` : ''}`);
+    }
+    lines.push('');
+  };
+  block('Überfällig', overdue);
+  block('Diese Woche fällig', dueThisWeek);
+  block('Neue Kommentare', withNewComments);
+  return lines.join('\n');
+}
+
 module.exports = {
   sendEmail,
   notifyCardAssigned,
   notifyCommentAdded,
   notifyCardMoved,
   notifyDueSoon,
+  notifyWeeklyDigest,
 };
