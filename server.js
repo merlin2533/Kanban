@@ -404,9 +404,12 @@ function sendPushToCardWatchers(cardId, action, details, excludeUserId) {
       comment_added: 'neuer Kommentar',
       checklist_item_created: 'neuer Checklist-Eintrag',
       checklist_item_updated: 'Checklist aktualisiert',
+      checklist_done: 'Checkliste vollständig abgehakt',
       card_archived: 'wurde archiviert',
       file_uploaded: 'neue Datei hochgeladen',
       card_assigned: 'wurde zugewiesen',
+      priority_high: 'Priorität auf Hoch gesetzt',
+      blocker_resolved: 'Blocker-Karte archiviert',
     };
     const body = details.user
       ? `${details.user}: ${actionLabels[action] || action}`
@@ -689,6 +692,16 @@ app.patch('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) =
   const board = db.updateBoard(id, title);
   if (!board) return res.status(404).json({ error: 'Board not found' });
   broadcast(id, { type: 'update', action: 'board_updated' });
+  // Email notification for board_updated
+  const boardMembers = db.getBoardMembers(id);
+  if (boardMembers && boardMembers.length > 0) {
+    const actorId = req.user ? req.user.id : null;
+    email.notifyBoardUpdated({
+      board,
+      byUsername: getRequestUser(req),
+      memberIds:  boardMembers.map(m => m.id).filter(mid => mid !== actorId),
+    }).catch(err => console.error('[EMAIL] notifyBoardUpdated error:', err));
+  }
   res.json(board);
 });
 
@@ -812,6 +825,23 @@ app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, mutationRa
   if (!card) return res.status(404).json({ error: 'Column not found' });
   const boardId = db.getColumnBoardId(columnId);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_created', user: createdBy });
+  // Email notification for card_created
+  if (boardId) {
+    const members = db.getBoardMembers(boardId);
+    if (members && members.length > 0) {
+      const boardRow = db.getDb().prepare('SELECT title FROM boards WHERE id = ?').get(boardId);
+      const colRow   = db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(columnId);
+      const actorId  = req.user ? req.user.id : null;
+      email.notifyCardCreated({
+        card,
+        boardId,
+        boardTitle:  boardRow ? boardRow.title : null,
+        columnTitle: colRow   ? colRow.title   : null,
+        byUsername:  createdBy,
+        memberIds:   members.map(m => m.id).filter(mid => mid !== actorId),
+      }).catch(err => console.error('[EMAIL] notifyCardCreated error:', err));
+    }
+  }
   res.status(201).json(card);
 });
 
@@ -849,12 +879,31 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
     if (te === null || (!isNaN(te) && te >= 0)) updates.time_estimate = te;
   }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No updates provided' });
+  // Capture previous state for due_date and priority change detection
+  const cardBefore = db.getDb().prepare('SELECT due_date, priority, text FROM cards WHERE id = ?').get(id);
   const card = db.updateCard(id, updates);
   if (!card) return res.status(404).json({ error: 'Card not found' });
   const boardId = db.getCardBoardId(id);
   const user = getRequestUser(req);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_updated', cardId: id, user });
   sendPushToCardWatchers(id, 'card_updated', { user }, req.user?.id);
+  // Email: due date changed
+  if (cardBefore && updates.due_date !== undefined && updates.due_date !== cardBefore.due_date) {
+    const assignees = db.getCardAssignees(id);
+    if (assignees.length > 0) {
+      email.notifyDueDateChanged({
+        card: { id, text: card.text },
+        oldDueDate:  cardBefore.due_date,
+        newDueDate:  card.due_date,
+        byUsername:  user,
+        assigneeIds: assignees.map(a => a.id),
+      }).catch(err => console.error('[EMAIL] notifyDueDateChanged error:', err));
+    }
+  }
+  // Push: priority set to high
+  if (cardBefore && updates.priority === 'high' && cardBefore.priority !== 'high') {
+    sendPushToCardWatchers(id, 'priority_high', { user }, req.user?.id);
+  }
   res.json(card);
 });
 
@@ -970,7 +1019,22 @@ app.put('/api/cards/:cardId/archive', authMiddleware, requireEdit, (req, res) =>
     }
   }
   broadcast(boardId, { type: 'update', action: 'card_archived' });
-  sendPushToCardWatchers(id, 'card_archived', { user: getRequestUser(req) }, req.user?.id);
+  const actor = getRequestUser(req);
+  sendPushToCardWatchers(id, 'card_archived', { user: actor }, req.user?.id);
+  // Email notification to assignees on archive
+  const assigneesArchive = db.getCardAssignees(id);
+  if (assigneesArchive.length > 0) {
+    email.notifyCardArchived({
+      card: { id, text: cardBefore ? cardBefore.text : String(id) },
+      byUsername:  actor,
+      assigneeIds: assigneesArchive.map(a => a.id),
+    }).catch(err => console.error('[EMAIL] notifyCardArchived error:', err));
+  }
+  // Push: notify watchers of cards that were blocked by this card
+  const blockedCards = db.getDb().prepare('SELECT blocked_card_id FROM card_dependencies WHERE blocking_card_id = ?').all(id);
+  for (const dep of blockedCards) {
+    sendPushToCardWatchers(dep.blocked_card_id, 'blocker_resolved', { blockingCard: cardBefore ? cardBefore.text : String(id), user: actor });
+  }
   res.json(card);
 });
 
@@ -1015,6 +1079,13 @@ app.patch('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => {
   const boardId = db.getCardBoardId(item.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_item_updated' });
   sendPushToCardWatchers(item.card_id, 'checklist_item_updated', { user: checkedBy }, req.user?.id);
+  // Push: notify if all checklist items are now checked
+  if (req.body.checked === true || req.body.checked === 1) {
+    const stats = db.getDb().prepare('SELECT COUNT(*) as total, SUM(checked) as done FROM checklist_items WHERE card_id = ?').get(item.card_id);
+    if (stats && stats.total > 0 && stats.done === stats.total) {
+      sendPushToCardWatchers(item.card_id, 'checklist_done', { user: checkedBy });
+    }
+  }
   res.json(item);
 });
 
@@ -1060,6 +1131,23 @@ app.post('/api/cards/:cardId/comments', authMiddleware, requireEdit, mutationRat
       comment: { text, author },
       notifyUserIds,
     }).catch(err => console.error('[EMAIL] notifyCommentAdded error:', err));
+    // @mention notifications – notify mentioned users not already covered by notifyCommentAdded
+    const mentionMatches = text.match(/@(\w+)/g);
+    if (mentionMatches) {
+      const mentionedUsernames = [...new Set(mentionMatches.map(m => m.slice(1)))];
+      for (const username of mentionedUsernames) {
+        const mentionedUser = db.getDb().prepare('SELECT id, username, email FROM users WHERE username = ?').get(username);
+        if (!mentionedUser) continue;
+        // Skip if already notified via notifyCommentAdded, or if it's the comment author
+        if (notifyUserIds.includes(mentionedUser.id)) continue;
+        if (mentionedUser.username === author) continue;
+        email.notifyMentioned({
+          card,
+          comment: { text, author },
+          mentionedUserId: mentionedUser.id,
+        }).catch(err => console.error('[EMAIL] notifyMentioned error:', err));
+      }
+    }
   }
   // Auto-watch card when commenting
   if (req.user) db.watchCard(id, req.user.id);
@@ -1248,9 +1336,16 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
   if (!att.file_data) return res.status(404).json({ error: 'Attachment data not found' });
   const safeFilename = path.basename(att.filename).replace(/"/g, '\\"');
-  res.setHeader('Content-Type', att.mimetype || 'application/octet-stream');
-  res.setHeader('Content-Disposition', `attachment; filename="${safeFilename}"`);
+  const mime = att.mimetype || 'application/octet-stream';
+  // Images and PDFs are served inline so the browser can display them directly
+  const inlineTypes = ['image/', 'application/pdf'];
+  const disposition = inlineTypes.some(t => mime.startsWith(t)) ? 'inline' : 'attachment';
+  res.setHeader('Content-Type', mime);
+  res.setHeader('Content-Disposition', `${disposition}; filename="${safeFilename}"`);
   res.setHeader('Content-Length', att.file_data.length);
+  if (mime === 'application/pdf') {
+    res.setHeader('Content-Security-Policy', 'sandbox');
+  }
   res.send(att.file_data);
 });
 

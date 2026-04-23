@@ -1289,6 +1289,10 @@ function createColumnEl(col) {
   div.className = 'column';
   div.dataset.columnId = col.id;
 
+  // Spalten-Hintergrundfarbe aus localStorage
+  const savedColColor = lsGet('col_color_' + boardId + '_' + col.id);
+  if (savedColColor) div.style.backgroundColor = savedColColor;
+
   // Header
   const header = document.createElement('div');
   header.className = 'column-header';
@@ -1399,6 +1403,38 @@ function createColumnEl(col) {
   header.appendChild(titleInput);
   header.appendChild(count);
   header.appendChild(collapseBtn);
+
+  // Farb-Swatch für Spalten-Hintergrundfarbe
+  if (canEditBoard()) {
+    const colorBtn = document.createElement('button');
+    colorBtn.className = 'col-color-btn';
+    colorBtn.textContent = '🎨';
+    colorBtn.title = 'Spaltenfarbe wählen (Rechtsklick zum Zurücksetzen)';
+
+    const colorInput = document.createElement('input');
+    colorInput.type = 'color';
+    colorInput.style.cssText = 'position:absolute;opacity:0;pointer-events:none;width:0;height:0;';
+    colorInput.value = savedColColor || '#f0f2f5';
+    colorBtn.appendChild(colorInput);
+
+    colorBtn.onclick = (e) => {
+      e.stopPropagation();
+      colorInput.click();
+    };
+    colorBtn.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      lsSet('col_color_' + boardId + '_' + col.id, '');
+      div.style.backgroundColor = '';
+    };
+    colorInput.oninput = (e) => {
+      const color = colorInput.value;
+      lsSet('col_color_' + boardId + '_' + col.id, color);
+      div.style.backgroundColor = color;
+    };
+    header.appendChild(colorBtn);
+  }
+
   header.appendChild(deleteBtn);
 
   // Column drag & drop
@@ -1518,6 +1554,12 @@ function createCardEl(card) {
   div.dataset.position = card.position;
   if (card.priority) div.dataset.priority = card.priority;
   if (card.due_date) div.dataset.dueDate = card.due_date;
+
+  // Überfällig-Erkennung
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const isOverdueCard = card.due_date && new Date(card.due_date) < today;
+  if (isOverdueCard) div.classList.add('card-overdue');
   if (card.assignees && card.assignees.length > 0) {
     div.dataset.assignees = card.assignees.map(a => a.username).join(',');
   }
@@ -1557,6 +1599,14 @@ function createCardEl(card) {
   textDiv.className = 'card-text';
   textDiv.textContent = card.text;
   div.appendChild(textDiv);
+
+  // Überfällig-Badge
+  if (isOverdueCard) {
+    const overdueBadge = document.createElement('div');
+    overdueBadge.className = 'overdue-badge';
+    overdueBadge.textContent = '⚠ Überfällig';
+    div.appendChild(overdueBadge);
+  }
 
   // Double-click for inline quick-edit
   textDiv.ondblclick = (e) => {
@@ -1615,11 +1665,14 @@ function createCardEl(card) {
 
   if (card.due_date) {
     const due = new Date(card.due_date);
-    const now = new Date();
+    const nowForDue = new Date();
     const dueSpan = document.createElement('span');
-    const isOverdue = due < now;
-    const isSoon = !isOverdue && (due - now) < 86400000 * 2; // 2 days
-    dueSpan.style.cssText = isOverdue ? 'color:#dc2626;' : isSoon ? 'color:#f59e0b;' : '';
+    const isSoon = !isOverdueCard && (due - nowForDue) < 86400000 * 2; // 2 days
+    if (isOverdueCard) {
+      dueSpan.className = 'overdue-date';
+    } else if (isSoon) {
+      dueSpan.style.color = '#f59e0b';
+    }
     dueSpan.textContent = '\uD83D\uDCC5 ' + due.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit' });
     meta.appendChild(dueSpan);
     hasMeta = true;
@@ -1679,9 +1732,83 @@ function createCardEl(card) {
 
   if (hasMeta) div.appendChild(meta);
 
-  if (card.priority) {
+  // Zeit-Fortschrittsbalken
+  if (card.time_estimate > 0) {
+    const timeProgress = document.createElement('div');
+    timeProgress.className = 'time-progress';
+    const ratio = card.time_logged ? card.time_logged / card.time_estimate : 0;
+    const pct = Math.min(ratio * 100, 100);
+    const barColor = ratio > 1 ? '#dc2626' : ratio >= 0.8 ? '#f59e0b' : '#22c55e';
+    const track = document.createElement('div');
+    track.className = 'time-progress-bar-track';
+    const bar = document.createElement('div');
+    bar.className = 'time-progress-bar';
+    bar.style.width = pct + '%';
+    bar.style.background = barColor;
+    track.appendChild(bar);
+    timeProgress.appendChild(track);
+    const label = document.createElement('div');
+    label.className = 'time-progress-label';
+    const loggedMin = card.time_logged || 0;
+    label.textContent = `${loggedMin}m / ${card.time_estimate}m`;
+    timeProgress.appendChild(label);
+    div.appendChild(timeProgress);
+  }
+
+  // Prioritäts-Rand (überfällig überschreibt Priorität)
+  if (isOverdueCard) {
+    div.style.borderLeft = '4px solid #dc2626';
+  } else if (card.priority) {
     const colors = { high: '#dc2626', medium: '#f59e0b', low: '#22c55e' };
     div.style.borderLeft = `4px solid ${colors[card.priority] || 'transparent'}`;
+  }
+
+  // Schnellbearbeitung Gear-Menü
+  if (canEdit()) {
+    const gearBtn = document.createElement('button');
+    gearBtn.className = 'card-gear-btn';
+    gearBtn.textContent = '⚙';
+    gearBtn.title = 'Schnellbearbeitung';
+    gearBtn.onclick = (e) => {
+      e.stopPropagation();
+      // Schließe andere offene Menus
+      document.querySelectorAll('.card-quick-menu').forEach(m => m.remove());
+      const menu = document.createElement('div');
+      menu.className = 'card-quick-menu';
+      const priorities = [
+        { value: null, label: '— Keine' },
+        { value: 'low', label: '🟢 Niedrig' },
+        { value: 'medium', label: '🟡 Mittel' },
+        { value: 'high', label: '🔴 Hoch' },
+      ];
+      for (const p of priorities) {
+        const btn = document.createElement('button');
+        btn.className = 'card-quick-menu-item';
+        btn.textContent = p.label;
+        if (card.priority === p.value) btn.classList.add('active');
+        btn.onclick = async (ev) => {
+          ev.stopPropagation();
+          menu.remove();
+          try {
+            await api(`/api/cards/${card.id}`, 'PATCH', { priority: p.value });
+            loadBoard();
+          } catch (err) { showError(err.message); }
+        };
+        menu.appendChild(btn);
+      }
+      div.appendChild(menu);
+      // Außerhalb-Klick schließt Menu
+      setTimeout(() => {
+        const closeMenu = (ev) => {
+          if (!menu.contains(ev.target)) {
+            menu.remove();
+            document.removeEventListener('click', closeMenu);
+          }
+        };
+        document.addEventListener('click', closeMenu);
+      }, 0);
+    };
+    div.appendChild(gearBtn);
   }
 
   // Bulk select checkbox
@@ -1705,6 +1832,7 @@ function createCardEl(card) {
   div.onclick = (e) => {
     if (e.target.closest('.card-thumbnail')) return;
     if (e.target.classList.contains('card-bulk-checkbox')) return;
+    if (e.target.closest('.card-gear-btn') || e.target.closest('.card-quick-menu')) return;
     if (window._bulkMode && window._bulkMode()) {
       // In bulk mode: toggle selection
       const cb = div.querySelector('.card-bulk-checkbox');

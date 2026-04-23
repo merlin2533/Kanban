@@ -181,6 +181,23 @@ function esc(str) {
   return d.innerHTML;
 }
 
+// --- @Mention highlighting ---
+// First escapes plain text, then wraps @username patterns in a span.
+// When used after renderMarkdown, pass the raw text and combine both steps.
+function renderMentions(text) {
+  const escaped = esc(text);
+  return escaped.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+}
+
+// Render comment text: apply markdown then highlight @mentions in text nodes only.
+function renderCommentText(text) {
+  const html = renderMarkdown(text);
+  // Replace @mentions only outside HTML tags (text between > and <)
+  return html.replace(/(>|^)([^<]*)(?=<|$)/g, (match, prefix, textContent) => {
+    return prefix + textContent.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+  });
+}
+
 function formatTime(iso) {
   const d = new Date(/Z$|[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z');
   const now = new Date();
@@ -205,7 +222,7 @@ function renderMarkdown(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/!\[([^\]]*)\]\((\/uploads\/[^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">')
+    .replace(/!\[([^\]]*)\]\((\/(?:uploads\/|api\/attachments\/)[^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">')
     .replace(/\[(.+?)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
@@ -233,7 +250,7 @@ async function handleImagePaste(e, textarea, afterUpload) {
     const form = new FormData();
     form.append('file', file);
     const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
-    const md = `![${att.filename}](/uploads/${att.filepath})`;
+    const md = `![${att.filename}](/api/attachments/${att.id})`;
     textarea.value = textarea.value.replace(placeholder, md);
     textarea.dispatchEvent(new Event('input'));
     if (afterUpload) await afterUpload();
@@ -241,6 +258,69 @@ async function handleImagePaste(e, textarea, afterUpload) {
     textarea.value = textarea.value.replace(placeholder, '');
     showError('Bild-Upload fehlgeschlagen: ' + err.message);
   }
+}
+
+// --- Markdown toolbar ---
+function insertMarkdown(textarea, before, after, placeholder) {
+  const start = textarea.selectionStart;
+  const end = textarea.selectionEnd;
+  const selected = textarea.value.substring(start, end) || placeholder;
+  const newText = before + selected + after;
+  textarea.value = textarea.value.substring(0, start) + newText + textarea.value.substring(end);
+  if (start === end) {
+    textarea.selectionStart = start + before.length;
+    textarea.selectionEnd = start + before.length + placeholder.length;
+  } else {
+    textarea.selectionStart = start;
+    textarea.selectionEnd = start + newText.length;
+  }
+  textarea.focus();
+  textarea.dispatchEvent(new Event('input'));
+}
+
+function setupMarkdownToolbar(textarea, toolbar) {
+  if (!toolbar || !textarea) return;
+
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = 'image/*';
+  fileInput.style.display = 'none';
+  document.body.appendChild(fileInput);
+
+  fileInput.onchange = async () => {
+    const file = fileInput.files[0];
+    if (!file) return;
+    fileInput.value = '';
+    const placeholder = '![Bild wird hochgeladen...]()';
+    insertAtCursor(textarea, placeholder);
+    try {
+      const form = new FormData();
+      form.append('file', file);
+      const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
+      const md = `![${att.filename}](/api/attachments/${att.id})`;
+      textarea.value = textarea.value.replace(placeholder, md);
+      textarea.dispatchEvent(new Event('input'));
+    } catch (err) {
+      textarea.value = textarea.value.replace(placeholder, '');
+      showError('Bild-Upload fehlgeschlagen: ' + err.message);
+    }
+  };
+
+  toolbar.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-action]');
+    if (!btn) return;
+    e.preventDefault();
+    const action = btn.dataset.action;
+    switch (action) {
+      case 'bold':    insertMarkdown(textarea, '**', '**', 'fetter Text'); break;
+      case 'italic':  insertMarkdown(textarea, '*', '*', 'kursiver Text'); break;
+      case 'heading': insertMarkdown(textarea, '## ', '', 'Überschrift'); break;
+      case 'list':    insertMarkdown(textarea, '- ', '', 'Listenpunkt'); break;
+      case 'code':    insertMarkdown(textarea, '`', '`', 'code'); break;
+      case 'link':    insertMarkdown(textarea, '[', '](https://)', 'Link-Text'); break;
+      case 'image':   fileInput.click(); break;
+    }
+  });
 }
 
 // --- Load card data ---
@@ -364,7 +444,8 @@ function renderCardPage() {
     document.querySelectorAll('.priority-btn').forEach(b => b.disabled = true);
     document.getElementById('addCommentBtn').style.display = 'none';
     document.getElementById('commentInput').style.display = 'none';
-    document.querySelector('.comment-markdown-hint').style.display = 'none';
+    document.querySelectorAll('.comment-markdown-hint').forEach(el => el.style.display = 'none');
+    document.querySelectorAll('.md-toolbar').forEach(el => el.style.display = 'none');
     document.getElementById('archiveCardBtn').style.display = 'none';
     document.getElementById('restoreCardBtn').style.display = 'none';
     document.getElementById('deleteCardBtn').style.display = 'none';
@@ -430,7 +511,7 @@ function renderComment(comment) {
 
   const text = document.createElement('div');
   text.className = 'comment-text';
-  text.innerHTML = renderMarkdown(comment.text);
+  text.innerHTML = renderCommentText(comment.text);
 
   const footer = document.createElement('div');
   footer.className = 'comment-footer';
@@ -877,6 +958,35 @@ async function reloadChecklist() {
 }
 
 // --- Attachments ---
+function openImageLightbox(src, filename) {
+  const overlay = document.createElement('div');
+  overlay.className = 'lightbox-overlay';
+  const inner = document.createElement('div');
+  inner.className = 'lightbox-inner';
+  const img = document.createElement('img');
+  img.src = src; img.className = 'lightbox-img'; img.alt = filename;
+  const footer = document.createElement('div');
+  footer.className = 'lightbox-footer';
+  const nameEl = document.createElement('span');
+  nameEl.className = 'lightbox-name'; nameEl.textContent = filename;
+  const dlLink = document.createElement('a');
+  dlLink.href = src; dlLink.download = filename;
+  dlLink.className = 'lightbox-download'; dlLink.textContent = '⬇ Herunterladen';
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'lightbox-close'; closeBtn.textContent = '\xD7';
+  closeBtn.setAttribute('aria-label', 'Schlie\xDFen');
+  closeBtn.onclick = () => overlay.remove();
+  footer.append(nameEl, dlLink, closeBtn);
+  inner.append(img, footer);
+  overlay.appendChild(inner);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  document.addEventListener('keydown', function esc(e) {
+    if (e.key === 'Escape') { overlay.remove(); document.removeEventListener('keydown', esc); }
+  });
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('lightbox-visible'));
+}
+
 function renderAttachments(attachments) {
   const container = document.getElementById('attachmentsList');
   container.innerHTML = '';
@@ -886,8 +996,11 @@ function renderAttachments(attachments) {
     if (att.mimetype && att.mimetype.startsWith('image/')) {
       const thumb = document.createElement('img');
       thumb.className = 'attachment-thumb';
-      thumb.src = '/uploads/' + att.filepath.split(/[/\\]/).pop();
+      thumb.src = `/api/attachments/${att.id}`;
       thumb.alt = att.filename;
+      thumb.loading = 'lazy';
+      thumb.style.cursor = 'zoom-in';
+      thumb.onclick = () => openImageLightbox(`/api/attachments/${att.id}`, att.filename);
       item.appendChild(thumb);
     } else {
       const icon = document.createElement('div');
@@ -904,11 +1017,18 @@ function renderAttachments(attachments) {
     }
     const info = document.createElement('div');
     info.className = 'attachment-info';
+    const isImage = att.mimetype && att.mimetype.startsWith('image/');
     const name = document.createElement('a');
     name.className = 'attachment-name';
-    name.href = `/api/attachments/${att.id}`;
+    if (isImage) {
+      name.href = '#';
+      name.onclick = (e) => { e.preventDefault(); openImageLightbox(`/api/attachments/${att.id}`, att.filename); };
+    } else {
+      name.href = `/api/attachments/${att.id}`;
+      name.target = '_blank';
+      name.rel = 'noopener';
+    }
     name.textContent = att.filename;
-    name.target = '_blank';
     const size = document.createElement('div');
     size.className = 'attachment-size';
     size.textContent = formatSize(att.size);
@@ -997,6 +1117,27 @@ function setupSSE() {
       if (event.type !== 'update') return;
       // A new card being created doesn't affect the current card page
       if (event.action === 'card_created') return;
+      // Echtzeit-Aktivitäts-Feed: bei neuem Kommentar Aktivität nachladen und Flash-Effekt anzeigen
+      if (event.action === 'comment_created' && event.cardId === cardId) {
+        // Aktivitäts-Feed neu laden wenn er sichtbar ist
+        const activityList = document.getElementById('activityList');
+        if (activityList && !activityList.classList.contains('hidden')) {
+          activityLoaded = false;
+          api(`/api/cards/${cardId}/activity`).then(activities => {
+            renderActivity(activities, activityList);
+            activityLoaded = true;
+          }).catch(() => {});
+        } else {
+          // Flag zurücksetzen damit beim nächsten Öffnen frisch geladen wird
+          activityLoaded = false;
+        }
+        // Flash-Effekt auf Aktivitätsbereich
+        if (activityList) {
+          activityList.classList.add('activity-flash');
+          setTimeout(() => activityList.classList.remove('activity-flash'), 600);
+        }
+        return;
+      }
       // Reload if this card or the board changed
       if (!event.cardId || event.cardId === cardId || event.action === 'bulk_move' || event.action === 'bulk_archive') {
         loadCard();
@@ -1149,6 +1290,41 @@ function setupNotificationCheck() {
   }
 }
 
+// --- Tipp-Indikator ---
+function setupTypingIndicator() {
+  const commentForm = document.querySelector('.card-page-comment-form');
+  if (!commentForm) return;
+
+  // Indikator-Element einfügen
+  let indicator = document.getElementById('typingIndicator');
+  if (!indicator) {
+    indicator = document.createElement('div');
+    indicator.id = 'typingIndicator';
+    indicator.className = 'typing-indicator hidden';
+    commentForm.appendChild(indicator);
+  }
+
+  const TYPING_TIMEOUT = 3000; // 3 Sekunden
+
+  setInterval(() => {
+    const key = 'typing_' + boardId + '_' + cardId;
+    const val = lsGet(key);
+    if (!val) { indicator.classList.add('hidden'); return; }
+    const colonIdx = val.indexOf(':');
+    const typingUser = val.substring(0, colonIdx);
+    const ts = parseInt(val.substring(colonIdx + 1), 10);
+    const myUsername = getCurrentUsername();
+    // Eigene Einträge ignorieren
+    if (typingUser === myUsername) { indicator.classList.add('hidden'); return; }
+    if (Date.now() - ts < TYPING_TIMEOUT) {
+      indicator.textContent = typingUser + ' tippt gerade...';
+      indicator.classList.remove('hidden');
+    } else {
+      indicator.classList.add('hidden');
+    }
+  }, 2000);
+}
+
 // --- Setup event listeners ---
 function setupEvents() {
   // Title save on blur
@@ -1286,6 +1462,21 @@ function setupEvents() {
   };
   commentInput.addEventListener('paste', (e) => handleImagePaste(e, commentInput));
 
+  // Tipp-Indikator: bei Eingabe Typing-Signal in localStorage setzen (debounced)
+  let typingDebounceTimer = null;
+  commentInput.addEventListener('input', () => {
+    clearTimeout(typingDebounceTimer);
+    typingDebounceTimer = setTimeout(() => {
+      const username = getCurrentUsername();
+      if (username) {
+        lsSet('typing_' + boardId + '_' + cardId, username + ':' + Date.now());
+      }
+    }, 500);
+  });
+
+  // Tipp-Indikator alle 2 Sekunden prüfen
+  setupTypingIndicator();
+
   // Duplicate
   document.getElementById('duplicateCardBtn').onclick = duplicateCard;
 
@@ -1413,6 +1604,34 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// --- Karten-Vorlagen (Card Templates) ---
+async function saveAsTemplate() {
+  const name = prompt('Vorlagen-Name:', (card && card.text) ? card.text : '');
+  if (!name || !name.trim()) return;
+  try {
+    await api(`/api/boards/${boardId}/card-templates`, 'POST', {
+      name: name.trim(),
+      text_template: card.text || '',
+      description_template: card.description || '',
+      priority: card.priority || null,
+    });
+    showSuccess('Vorlage gespeichert!');
+  } catch (e) {
+    showError('Vorlage konnte nicht gespeichert werden: ' + e.message);
+  }
+}
+
+function setupTemplateButton() {
+  const btn = document.getElementById('saveTemplateBtn');
+  if (!btn) return;
+  if (canEdit()) {
+    btn.style.display = '';
+    btn.onclick = saveAsTemplate;
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
 // --- Init ---
 if (!boardId || !cardId) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -1427,9 +1646,18 @@ if (!boardId || !cardId) {
     if (!authed) return;
     setupEvents();
     setupDescriptionPreview();
+    setupMarkdownToolbar(
+      document.getElementById('cardDescription'),
+      document.getElementById('descToolbar')
+    );
+    setupMarkdownToolbar(
+      document.getElementById('commentInput'),
+      document.getElementById('commentToolbar')
+    );
     await loadCard();
     setupSSE();
     setupNotificationCheck();
+    setupTemplateButton();
     // Watch button
     loadWatchStatus();
     const watchBtn = document.getElementById('watchCardBtn');
