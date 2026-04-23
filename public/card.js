@@ -1498,6 +1498,34 @@ function urlBase64ToUint8Array(base64String) {
   return outputArray;
 }
 
+// --- Karten-Vorlagen (Card Templates) ---
+async function saveAsTemplate() {
+  const name = prompt('Vorlagen-Name:', (card && card.text) ? card.text : '');
+  if (!name || !name.trim()) return;
+  try {
+    await api(`/api/boards/${boardId}/card-templates`, 'POST', {
+      name: name.trim(),
+      text_template: card.text || '',
+      description_template: card.description || '',
+      priority: card.priority || null,
+    });
+    showSuccess('Vorlage gespeichert!');
+  } catch (e) {
+    showError('Vorlage konnte nicht gespeichert werden: ' + e.message);
+  }
+}
+
+function setupTemplateButton() {
+  const btn = document.getElementById('saveTemplateBtn');
+  if (!btn) return;
+  if (canEdit()) {
+    btn.style.display = '';
+    btn.onclick = saveAsTemplate;
+  } else {
+    btn.style.display = 'none';
+  }
+}
+
 // --- Init ---
 if (!boardId || !cardId) {
   document.addEventListener('DOMContentLoaded', () => {
@@ -1515,6 +1543,7 @@ if (!boardId || !cardId) {
     await loadCard();
     setupSSE();
     setupNotificationCheck();
+    setupTemplateButton();
     // Watch button
     loadWatchStatus();
     const watchBtn = document.getElementById('watchCardBtn');
