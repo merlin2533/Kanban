@@ -1182,6 +1182,10 @@ function createComment(cardId, text, author) {
   return db.prepare('SELECT * FROM comments WHERE id = ?').get(result.lastInsertRowid);
 }
 
+function getComment(id) {
+  return db.prepare('SELECT * FROM comments WHERE id = ?').get(id) || null;
+}
+
 function updateComment(id, text) {
   const comment = db.prepare('SELECT * FROM comments WHERE id = ?').get(id);
   if (!comment) return null;
@@ -1716,7 +1720,7 @@ module.exports = {
   // Archive
   archiveCard, restoreCard, getArchivedCards,
   // Comments
-  getComments, getCardCommentCount, createComment, updateComment, deleteComment,
+  getComments, getCardCommentCount, createComment, getComment, updateComment, deleteComment,
   // Export/Import
   exportBoard, importBoard,
   // Auth

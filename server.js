@@ -1160,18 +1160,42 @@ app.patch('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) =>
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
   const text = validString(req.body.text, 5000);
   if (!text) return res.status(400).json({ error: 'text required' });
+  const existing = db.getComment(id);
+  if (!existing) return res.status(404).json({ error: 'Comment not found' });
+  const requestUser = getRequestUser(req);
+  const isAdmin = req.user && req.user.is_admin;
+  if (!isAdmin && (!existing.author || !requestUser || existing.author !== requestUser)) {
+    return res.status(403).json({ error: 'Nur eigene Kommentare können bearbeitet werden' });
+  }
+  if (!isAdmin) {
+    const created = new Date(existing.created_at.replace(' ', 'T') + 'Z');
+    if (Date.now() - created.getTime() > 60 * 60 * 1000) {
+      return res.status(403).json({ error: 'Bearbeitungsfenster abgelaufen (1 Stunde)' });
+    }
+  }
   const comment = db.updateComment(id, text);
-  if (!comment) return res.status(404).json({ error: 'Comment not found' });
   const boardId = db.getCardBoardId(comment.card_id);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'comment_updated', cardId: comment.card_id, user: getRequestUser(req) });
+  if (boardId) broadcast(boardId, { type: 'update', action: 'comment_updated', cardId: comment.card_id, user: requestUser });
   res.json(comment);
 });
 
 app.delete('/api/comments/:commentId', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.commentId);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const comment = db.deleteComment(id);
-  if (!comment) return res.status(404).json({ error: 'Comment not found' });
+  const existing = db.getComment(id);
+  if (!existing) return res.status(404).json({ error: 'Comment not found' });
+  const requestUser = getRequestUser(req);
+  const isAdmin = req.user && req.user.is_admin;
+  if (!isAdmin && (!existing.author || !requestUser || existing.author !== requestUser)) {
+    return res.status(403).json({ error: 'Nur eigene Kommentare können gelöscht werden' });
+  }
+  if (!isAdmin) {
+    const created = new Date(existing.created_at.replace(' ', 'T') + 'Z');
+    if (Date.now() - created.getTime() > 60 * 60 * 1000) {
+      return res.status(403).json({ error: 'Bearbeitungsfenster abgelaufen (1 Stunde)' });
+    }
+  }
+  db.deleteComment(id);
   res.json({ ok: true });
 });
 

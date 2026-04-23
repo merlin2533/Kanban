@@ -198,6 +198,13 @@ function renderCommentText(text) {
   });
 }
 
+function isCommentEditable(comment) {
+  const me = getCurrentUsername();
+  if (!me || !comment.author || comment.author !== me) return false;
+  const created = new Date(/Z$|[+-]\d{2}:\d{2}$/.test(comment.created_at) ? comment.created_at : comment.created_at.replace(' ', 'T') + 'Z');
+  return (Date.now() - created.getTime()) < 60 * 60 * 1000;
+}
+
 function formatTime(iso) {
   const d = new Date(/Z$|[+-]\d{2}:\d{2}$/.test(iso) ? iso : iso + 'Z');
   const now = new Date();
@@ -525,7 +532,7 @@ function renderComment(comment) {
   const actions = document.createElement('span');
   actions.className = 'comment-actions';
 
-  if (canEdit()) {
+  if (isCommentEditable(comment)) {
     const edit = document.createElement('button');
     edit.className = 'comment-edit';
     edit.innerHTML = '&#9998;';
@@ -560,19 +567,19 @@ function renderComment(comment) {
       editArea.insertAdjacentElement('afterend', saveRow);
     };
     actions.appendChild(edit);
-  }
 
-  const del = document.createElement('button');
-  del.className = 'comment-delete';
-  del.innerHTML = '&times;';
-  del.title = 'Löschen';
-  del.onclick = async () => {
-    try {
-      await api(`/api/comments/${comment.id}`, 'DELETE');
-      reloadComments();
-    } catch (e) { showError(e.message); }
-  };
-  actions.appendChild(del);
+    const del = document.createElement('button');
+    del.className = 'comment-delete';
+    del.innerHTML = '&times;';
+    del.title = 'Löschen';
+    del.onclick = async () => {
+      try {
+        await api(`/api/comments/${comment.id}`, 'DELETE');
+        reloadComments();
+      } catch (e) { showError(e.message); }
+    };
+    actions.appendChild(del);
+  }
 
   footer.appendChild(time);
   footer.appendChild(actions);

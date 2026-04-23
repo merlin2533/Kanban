@@ -2813,6 +2813,13 @@ function formatTime(iso) {
   return d.toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
+function isCommentEditable(comment) {
+  const me = getCurrentUsername();
+  if (!me || !comment.author || comment.author !== me) return false;
+  const created = new Date(/Z$|[+-]\d{2}:\d{2}$/.test(comment.created_at) ? comment.created_at : comment.created_at.replace(' ', 'T') + 'Z');
+  return (Date.now() - created.getTime()) < 60 * 60 * 1000;
+}
+
 // --- Comments ---
 function renderComments(comments) {
   const container = document.getElementById('commentsList');
@@ -2854,14 +2861,12 @@ function renderComments(comments) {
     const actions = document.createElement('span');
     actions.className = 'comment-actions';
 
-    // Edit button
-    if (canEdit()) {
+    if (isCommentEditable(comment)) {
       const edit = document.createElement('button');
       edit.className = 'comment-edit';
       edit.innerHTML = '&#9998;';
       edit.title = 'Bearbeiten';
       edit.onclick = () => {
-        // Replace text div with textarea for editing
         const editArea = document.createElement('textarea');
         editArea.className = 'comment-edit-area';
         editArea.value = comment.text;
@@ -2891,19 +2896,18 @@ function renderComments(comments) {
         editArea.insertAdjacentElement('afterend', saveRow);
       };
       actions.appendChild(edit);
-    }
 
-    // Delete button
-    const del = document.createElement('button');
-    del.className = 'comment-delete';
-    del.innerHTML = '&times;';
-    del.onclick = async () => {
-      try {
-        await api(`/api/comments/${comment.id}`, 'DELETE');
-        reloadComments();
-      } catch (e) { showError(e.message); }
-    };
-    actions.appendChild(del);
+      const del = document.createElement('button');
+      del.className = 'comment-delete';
+      del.innerHTML = '&times;';
+      del.onclick = async () => {
+        try {
+          await api(`/api/comments/${comment.id}`, 'DELETE');
+          reloadComments();
+        } catch (e) { showError(e.message); }
+      };
+      actions.appendChild(del);
+    }
 
     footer.appendChild(time);
     footer.appendChild(actions);
