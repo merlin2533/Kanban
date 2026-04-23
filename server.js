@@ -695,10 +695,11 @@ app.patch('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) =
   // Email notification for board_updated
   const boardMembers = db.getBoardMembers(id);
   if (boardMembers && boardMembers.length > 0) {
+    const actorId = req.user ? req.user.id : null;
     email.notifyBoardUpdated({
       board,
       byUsername: getRequestUser(req),
-      memberIds:  boardMembers.map(m => m.id),
+      memberIds:  boardMembers.map(m => m.id).filter(mid => mid !== actorId),
     }).catch(err => console.error('[EMAIL] notifyBoardUpdated error:', err));
   }
   res.json(board);
@@ -830,13 +831,14 @@ app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, mutationRa
     if (members && members.length > 0) {
       const boardRow = db.getDb().prepare('SELECT title FROM boards WHERE id = ?').get(boardId);
       const colRow   = db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(columnId);
+      const actorId  = req.user ? req.user.id : null;
       email.notifyCardCreated({
         card,
         boardId,
         boardTitle:  boardRow ? boardRow.title : null,
         columnTitle: colRow   ? colRow.title   : null,
         byUsername:  createdBy,
-        memberIds:   members.map(m => m.id),
+        memberIds:   members.map(m => m.id).filter(mid => mid !== actorId),
       }).catch(err => console.error('[EMAIL] notifyCardCreated error:', err));
     }
   }
@@ -892,7 +894,7 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
       email.notifyDueDateChanged({
         card: { id, text: card.text },
         oldDueDate:  cardBefore.due_date,
-        newDueDate:  updates.due_date,
+        newDueDate:  card.due_date,
         byUsername:  user,
         assigneeIds: assignees.map(a => a.id),
       }).catch(err => console.error('[EMAIL] notifyDueDateChanged error:', err));
@@ -1341,6 +1343,9 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   res.setHeader('Content-Type', mime);
   res.setHeader('Content-Disposition', `${disposition}; filename="${safeFilename}"`);
   res.setHeader('Content-Length', att.file_data.length);
+  if (mime === 'application/pdf') {
+    res.setHeader('Content-Security-Policy', 'sandbox');
+  }
   res.send(att.file_data);
 });
 

@@ -1611,7 +1611,8 @@ function getCardEmailContext(cardId) {
 }
 
 function getRecentComments(cardId, limit = 5) {
-  return db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at ASC LIMIT ?').all(cardId, limit);
+  const rows = db.prepare('SELECT * FROM comments WHERE card_id = ? ORDER BY created_at DESC LIMIT ?').all(cardId, limit);
+  return rows.reverse(); // oldest first so email context reads top-to-bottom
 }
 
 function setNotificationPref(userId, eventType, emailEnabled) {

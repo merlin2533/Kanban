@@ -189,10 +189,13 @@ function renderMentions(text) {
   return escaped.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
 }
 
-// Render comment text: apply markdown then highlight @mentions.
+// Render comment text: apply markdown then highlight @mentions in text nodes only.
 function renderCommentText(text) {
-  // renderMarkdown already HTML-escapes the input; apply mention spans afterwards.
-  return renderMarkdown(text).replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+  const html = renderMarkdown(text);
+  // Replace @mentions only outside HTML tags (text between > and <)
+  return html.replace(/(>|^)([^<]*)(?=<|$)/g, (match, prefix, textContent) => {
+    return prefix + textContent.replace(/@(\w+)/g, '<span class="mention">@$1</span>');
+  });
 }
 
 function formatTime(iso) {

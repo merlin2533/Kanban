@@ -65,7 +65,7 @@ async function notifyCardAssigned({ assignedUserId, card, byUsername }) {
 
   await sendEmail({
     to:      user.email,
-    subject: `Du wurdest einer Karte zugewiesen: "${card.text}"`,
+    subject: safeSubject(`Du wurdest einer Karte zugewiesen: "${card.text}"`),
     text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat dich der Karte "${card.text}" zugewiesen.\n`,
     html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
               <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat dich der Karte <strong>${escHtml(card.text)}</strong> zugewiesen.</p>`,
@@ -110,7 +110,7 @@ async function notifyCommentAdded({ card, comment, notifyUserIds }) {
 
     await sendEmail({
       to:      user.email,
-      subject: `Neuer Kommentar auf "${(cardCtx || card).text}"`,
+      subject: safeSubject(`Neuer Kommentar auf "${(cardCtx || card).text}"`),
       html,
       text,
     });
@@ -135,7 +135,7 @@ async function notifyCardMoved({ card, fromColumn, toColumn, byUsername, assigne
     const from = fromColumn ? `von "${fromColumn}" ` : '';
     await sendEmail({
       to:      user.email,
-      subject: `Karte verschoben: "${card.text}"`,
+      subject: safeSubject(`Karte verschoben: "${card.text}"`),
       text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat die Karte "${card.text}" ${from}nach "${toColumn}" verschoben.\n`,
       html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
                 <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat die Karte <strong>${escHtml(card.text)}</strong> ${escHtml(from)}nach <strong>${escHtml(toColumn)}</strong> verschoben.</p>`,
@@ -155,7 +155,7 @@ async function notifyDueSoon(rows) {
 
     await sendEmail({
       to:      row.email,
-      subject: `Erinnerung: Karte "${row.text}" ist bald fällig`,
+      subject: safeSubject(`Erinnerung: Karte "${row.text}" ist bald fällig`),
       text:    `Hallo ${row.username},\n\nDie Karte "${row.text}" ist am ${row.due_date} fällig.\n`,
       html:    `<p>Hallo <strong>${escHtml(row.username)}</strong>,</p>
                 <p>Die Karte <strong>${escHtml(row.text)}</strong> ist am <strong>${escHtml(row.due_date)}</strong> fällig.</p>`,
@@ -285,7 +285,12 @@ function escHtml(str) {
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function safeSubject(str) {
+  return String(str || '').replace(/[\r\n]+/g, ' ').slice(0, 200);
 }
 
 // ---------------------------------------------------------------------------
@@ -313,7 +318,7 @@ async function notifyWeeklyDigest(recipients) {
     const from = new Date().toLocaleDateString('de-DE', { day: '2-digit', month: '2-digit', year: 'numeric' });
     await sendEmail({
       to:      recipient.email,
-      subject: `Wochenzusammenfassung Kanban – ${from}`,
+      subject: safeSubject(`Wochenzusammenfassung Kanban – ${from}`),
       html,
       text,
     });
@@ -402,7 +407,7 @@ async function notifyCardCreated({ card, boardId, boardTitle, columnTitle, byUse
 
     await sendEmail({
       to:      user.email,
-      subject: `Neue Karte angelegt: "${card.text}"`,
+      subject: safeSubject(`Neue Karte angelegt: "${card.text}"`),
       text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat eine neue Karte angelegt:\n\nKarte:  ${card.text}\nBoard:  ${boardTitle || boardId}\nSpalte: ${columnTitle || ''}\n`,
       html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
                 <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat eine neue Karte angelegt:</p>
@@ -430,7 +435,7 @@ async function notifyCardArchived({ card, byUsername, assigneeIds }) {
 
     await sendEmail({
       to:      user.email,
-      subject: `Karte archiviert: "${card.text}"`,
+      subject: safeSubject(`Karte archiviert: "${card.text}"`),
       text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat die Karte "${card.text}" archiviert.\n`,
       html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
                 <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat die Karte <strong>${escHtml(card.text)}</strong> archiviert.</p>`,
@@ -453,7 +458,7 @@ async function notifyBoardUpdated({ board, byUsername, memberIds }) {
 
     await sendEmail({
       to:      user.email,
-      subject: `Board aktualisiert: "${board.title}"`,
+      subject: safeSubject(`Board aktualisiert: "${board.title}"`),
       text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat das Board "${board.title}" aktualisiert.\n`,
       html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
                 <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat das Board <strong>${escHtml(board.title)}</strong> aktualisiert.</p>`,
@@ -479,7 +484,7 @@ async function notifyMentioned({ card, comment, mentionedUserId }) {
 
   await sendEmail({
     to:      user.email,
-    subject: `Du wurdest erwähnt in "${cardCtx.text}"`,
+    subject: safeSubject(`Du wurdest erwähnt in "${cardCtx.text}"`),
     text:    `Hallo ${user.username},\n\n${comment.author || 'Jemand'} hat dich in einem Kommentar auf der Karte "${cardCtx.text}" erwähnt:\n\n${comment.text}\n`,
     html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
               <p><strong>${escHtml(comment.author || 'Jemand')}</strong> hat dich in einem Kommentar erwähnt:</p>
@@ -513,7 +518,7 @@ async function notifyDueDateChanged({ card, oldDueDate, newDueDate, byUsername, 
 
     await sendEmail({
       to:      user.email,
-      subject: `Fälligkeitsdatum geändert: "${card.text}" – neu: ${newDateStr}`,
+      subject: safeSubject(`Fälligkeitsdatum geändert: "${card.text}" – neu: ${newDateStr}`),
       text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat das Fälligkeitsdatum der Karte "${card.text}" geändert.\n\nAlt: ${oldDateStr}\nNeu: ${newDateStr}\n`,
       html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
                 <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat das Fälligkeitsdatum der Karte <strong>${escHtml(card.text)}</strong> geändert:</p>
