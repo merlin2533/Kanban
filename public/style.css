@@ -1136,6 +1136,13 @@ main#board {
   color: #334155;
 }
 
+.comment-header-time {
+  font-size: 11px;
+  color: #94a3b8;
+  font-weight: 400;
+  margin-left: 2px;
+}
+
 /* --- Activity User --- */
 .activity-user {
   color: #2563eb;
@@ -1983,8 +1990,8 @@ main#board {
 }
 
 .sidebar-section {
-  margin-bottom: 20px;
-  padding-bottom: 20px;
+  margin-bottom: 14px;
+  padding-bottom: 14px;
   border-bottom: 1px solid var(--color-border-light);
 }
 .sidebar-section:last-child {
@@ -1999,7 +2006,30 @@ main#board {
   color: var(--color-text-muted);
   text-transform: uppercase;
   letter-spacing: 0.6px;
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+}
+
+/* Collapsible sidebar sections */
+.sidebar-collapsible .sidebar-collapsible-toggle {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+  margin-bottom: 0;
+}
+.sidebar-collapsible .sidebar-collapse-icon {
+  font-size: 9px;
+  transition: transform 0.2s;
+}
+.sidebar-collapsible.collapsed .sidebar-collapse-icon {
+  transform: rotate(-90deg);
+}
+.sidebar-collapsible-body {
+  overflow: hidden;
+  margin-top: 8px;
+}
+.sidebar-collapsible.collapsed .sidebar-collapsible-body {
+  display: none;
 }
 
 .sidebar-input {

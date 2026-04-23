@@ -96,44 +96,19 @@
         <!-- Status badge (archived) -->
         <div id="archivedBadge" class="archived-badge hidden">Archiviert</div>
 
+        <!-- Assignees — most important, always visible at top -->
+        <section class="sidebar-section" id="assigneesSection">
+          <h3 class="sidebar-section-label">Zugewiesen an</h3>
+          <div id="cardAssignees" class="assignee-list"></div>
+          <select id="assignUserSelect" class="sidebar-input" aria-label="Benutzer zuweisen" style="margin-top:8px;">
+            <option value="">+ Benutzer zuweisen...</option>
+          </select>
+        </section>
+
         <!-- Due Date -->
         <section class="sidebar-section">
           <h3 class="sidebar-section-label">Fälligkeitsdatum</h3>
           <input type="date" id="cardDueDate" class="sidebar-input" aria-label="Fälligkeitsdatum">
-        </section>
-
-        <!-- Time Tracking -->
-        <section class="sidebar-section" id="timeTrackingSection">
-          <h3 class="sidebar-section-label">Zeiterfassung</h3>
-          <div class="time-tracking-row">
-            <div class="time-field">
-              <label for="timeEstimate">Schätzung (Min)</label>
-              <input type="number" id="timeEstimate" class="sidebar-input" min="0" max="99999" placeholder="–" aria-label="Zeitschätzung in Minuten">
-            </div>
-            <div class="time-field">
-              <label>Geloggt</label>
-              <span id="timeLoggedDisplay" class="time-logged-display">–</span>
-            </div>
-          </div>
-          <div class="time-log-row" id="timeLogRow">
-            <label for="timeLogInput">Zeit buchen (Min)</label>
-            <div style="display:flex;gap:4px;margin-top:4px;">
-              <input type="number" id="timeLogInput" class="sidebar-input" min="1" max="1440" placeholder="z.B. 30" aria-label="Zeit buchen in Minuten" style="flex:1;">
-              <button id="timeLogBtn" class="btn-secondary" style="white-space:nowrap">Buchen</button>
-            </div>
-          </div>
-        </section>
-
-        <!-- Recurrence -->
-        <section class="sidebar-section">
-          <h3 class="sidebar-section-label">Wiederholung</h3>
-          <select id="cardRecurrence" class="sidebar-input" aria-label="Wiederholung">
-            <option value="">Keine</option>
-            <option value="daily">Täglich</option>
-            <option value="weekly">Wöchentlich</option>
-            <option value="monthly">Monatlich</option>
-          </select>
-          <p class="sidebar-hint">Nach Archivierung wird automatisch eine neue Karte erstellt.</p>
         </section>
 
         <!-- Priority -->
@@ -145,15 +120,6 @@
             <button data-priority="medium" class="priority-btn priority-medium">Mittel</button>
             <button data-priority="high" class="priority-btn priority-high">Hoch</button>
           </div>
-        </section>
-
-        <!-- Assignees -->
-        <section class="sidebar-section" id="assigneesSection">
-          <h3 class="sidebar-section-label">Zugewiesen</h3>
-          <div id="cardAssignees" class="assignee-list"></div>
-          <select id="assignUserSelect" class="sidebar-input" aria-label="Benutzer zuweisen" style="margin-top:8px;">
-            <option value="">+ Benutzer zuweisen...</option>
-          </select>
         </section>
 
         <!-- Labels -->
@@ -183,31 +149,76 @@
           </div>
         </section>
 
-        <!-- Attachments -->
-        <section class="sidebar-section">
-          <h3 class="sidebar-section-label">Dateien &amp; Bilder</h3>
-          <div id="attachmentsList"></div>
-          <div class="upload-area" id="uploadArea">
-            <input type="file" id="fileInput" multiple hidden accept="image/*,.pdf,.txt,.csv,.xls,.xlsx">
-            <button id="uploadBtn" aria-label="Datei auswählen">Datei hochladen</button>
-            <span class="upload-hint">oder hierher ziehen</span>
+        <!-- Attachments — collapsible -->
+        <section class="sidebar-section sidebar-collapsible collapsed" id="attachmentsSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Dateien &amp; Bilder <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div id="attachmentsList"></div>
+            <div class="upload-area" id="uploadArea">
+              <input type="file" id="fileInput" multiple hidden accept="image/*,.pdf,.txt,.csv,.xls,.xlsx">
+              <button id="uploadBtn" aria-label="Datei auswählen">Datei hochladen</button>
+              <span class="upload-hint">oder hierher ziehen</span>
+            </div>
           </div>
         </section>
 
-        <!-- Move Card -->
-        <section class="sidebar-section" id="moveSection">
-          <h3 class="sidebar-section-label">Verschieben</h3>
-          <div style="display:flex;gap:8px;">
-            <select id="moveColumnSelect" class="sidebar-input" aria-label="Spalte auswählen" style="flex:1;"></select>
-            <button id="moveCardBtn" class="btn-move">Verschieben</button>
+        <!-- Time Tracking — collapsible -->
+        <section class="sidebar-section sidebar-collapsible collapsed" id="timeTrackingSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Zeiterfassung <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div class="time-tracking-row">
+              <div class="time-field">
+                <label for="timeEstimate">Schätzung (Min)</label>
+                <input type="number" id="timeEstimate" class="sidebar-input" min="0" max="99999" placeholder="–" aria-label="Zeitschätzung in Minuten">
+              </div>
+              <div class="time-field">
+                <label>Geloggt</label>
+                <span id="timeLoggedDisplay" class="time-logged-display">–</span>
+              </div>
+            </div>
+            <div class="time-log-row" id="timeLogRow">
+              <label for="timeLogInput">Zeit buchen (Min)</label>
+              <div style="display:flex;gap:4px;margin-top:4px;">
+                <input type="number" id="timeLogInput" class="sidebar-input" min="1" max="1440" placeholder="z.B. 30" aria-label="Zeit buchen in Minuten" style="flex:1;">
+                <button id="timeLogBtn" class="btn-secondary" style="white-space:nowrap">Buchen</button>
+              </div>
+            </div>
           </div>
         </section>
 
-        <!-- Actions -->
-        <section class="sidebar-section sidebar-actions">
-          <button id="archiveCardBtn" class="archive-btn" style="width:100%;">Archivieren</button>
-          <button id="restoreCardBtn" class="restore-btn hidden" style="width:100%;">Wiederherstellen</button>
-          <button id="deleteCardBtn" class="danger-btn" style="width:100%;margin-top:8px;">Karte löschen</button>
+        <!-- Recurrence — collapsible -->
+        <section class="sidebar-section sidebar-collapsible collapsed">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Wiederholung <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <select id="cardRecurrence" class="sidebar-input" aria-label="Wiederholung">
+              <option value="">Keine</option>
+              <option value="daily">Täglich</option>
+              <option value="weekly">Wöchentlich</option>
+              <option value="monthly">Monatlich</option>
+            </select>
+            <p class="sidebar-hint">Nach Archivierung wird automatisch eine neue Karte erstellt.</p>
+          </div>
+        </section>
+
+        <!-- Move Card — collapsible -->
+        <section class="sidebar-section sidebar-collapsible collapsed" id="moveSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Verschieben <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div style="display:flex;gap:8px;">
+              <select id="moveColumnSelect" class="sidebar-input" aria-label="Spalte auswählen" style="flex:1;"></select>
+              <button id="moveCardBtn" class="btn-move">Verschieben</button>
+            </div>
+          </div>
+        </section>
+
+        <!-- Actions — collapsible -->
+        <section class="sidebar-section sidebar-collapsible collapsed sidebar-actions">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Aktionen <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <button id="archiveCardBtn" class="archive-btn" style="width:100%;">Archivieren</button>
+            <button id="restoreCardBtn" class="restore-btn hidden" style="width:100%;">Wiederherstellen</button>
+            <button id="deleteCardBtn" class="danger-btn" style="width:100%;margin-top:8px;">Karte löschen</button>
+          </div>
         </section>
 
       </aside>

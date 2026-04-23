@@ -1589,7 +1589,7 @@ function createCardEl(card) {
     if (img) {
       const thumb = document.createElement('img');
       thumb.className = 'card-thumbnail';
-      thumb.src = '/uploads/' + img.filepath.split(/[/\\]/).pop();
+      thumb.src = `/api/attachments/${img.id}`;
       thumb.alt = img.filename;
       div.appendChild(thumb);
     }
@@ -2480,7 +2480,7 @@ function renderAttachments(attachments) {
     if (att.mimetype && att.mimetype.startsWith('image/')) {
       const thumb = document.createElement('img');
       thumb.className = 'attachment-thumb';
-      thumb.src = '/uploads/' + att.filepath.split(/[/\\]/).pop();
+      thumb.src = `/api/attachments/${att.id}`;
       thumb.alt = att.filename;
       item.appendChild(thumb);
     } else {
