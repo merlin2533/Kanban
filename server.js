@@ -16,6 +16,9 @@ db.initSetting('resend_api_key',           process.env.RESEND_API_KEY           
 db.initSetting('email_from',               process.env.EMAIL_FROM               || 'support@yourdomain.com');
 db.initSetting('reminder_interval_hours',  process.env.REMINDER_INTERVAL_HOURS  || '24');
 db.initSetting('reminder_escalation_days', process.env.REMINDER_ESCALATION_DAYS || '3');
+db.initSetting('weekly_digest_enabled',    process.env.WEEKLY_DIGEST_ENABLED    || '1');
+db.initSetting('weekly_digest_day',        process.env.WEEKLY_DIGEST_DAY        || '1'); // 0=So, 1=Mo, …, 6=Sa
+db.initSetting('weekly_digest_hour',       process.env.WEEKLY_DIGEST_HOUR       || '8');
 db.initSetting('api_key',                  process.env.API_KEY                  || require('crypto').randomBytes(24).toString('hex'));
 
 // --- VAPID keys for Web Push ---
@@ -1451,13 +1454,17 @@ app.get('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
     email_from:               s.email_from               || '',
     reminder_interval_hours:  s.reminder_interval_hours  || '24',
     reminder_escalation_days: s.reminder_escalation_days || '3',
+    weekly_digest_enabled:    s.weekly_digest_enabled    || '1',
+    weekly_digest_day:        s.weekly_digest_day        || '1',
+    weekly_digest_hour:       s.weekly_digest_hour       || '8',
     api_key:                  s.api_key                  || '',
   });
 });
 
 // PUT /api/admin/settings  → update one or more settings
 app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
-  const allowed = ['resend_api_key', 'email_from', 'reminder_interval_hours', 'reminder_escalation_days'];
+  const allowed = ['resend_api_key', 'email_from', 'reminder_interval_hours', 'reminder_escalation_days',
+                   'weekly_digest_enabled', 'weekly_digest_day', 'weekly_digest_hour'];
   const changed = [];
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
@@ -1578,8 +1585,42 @@ function runDueDateReminders() {
 
 // Run once on startup (after a short delay) then on a regular interval
 setTimeout(runDueDateReminders, 30 * 1000);
-const REMINDER_POLL_MS = 60 * 60 * 1000; // check every hour regardless of reminder_interval_hours
+const REMINDER_POLL_MS = 60 * 60 * 1000; // check every hour
 setInterval(runDueDateReminders, REMINDER_POLL_MS);
+
+// --- Weekly digest job ---
+function runWeeklyDigest() {
+  try {
+    const enabled = db.getSetting('weekly_digest_enabled');
+    if (!enabled || enabled === '0') return;
+
+    const targetDay  = parseInt(db.getSetting('weekly_digest_day')  || '1', 10); // 0=Sun … 6=Sat
+    const targetHour = parseInt(db.getSetting('weekly_digest_hour') || '8',  10);
+    const now = new Date();
+    if (now.getDay() !== targetDay) return;
+    if (now.getHours() < targetHour) return;
+
+    // Avoid sending twice on the same day
+    const lastSent = db.getSetting('weekly_digest_last_sent');
+    if (lastSent) {
+      const diffMs = Date.now() - new Date(lastSent).getTime();
+      if (diffMs < 6 * 24 * 60 * 60 * 1000) return; // sent less than 6 days ago
+    }
+
+    db.setSetting('weekly_digest_last_sent', new Date().toISOString());
+
+    const recipients = db.getWeeklyDigestData();
+    if (recipients.length > 0) {
+      console.log(`[DIGEST] Sending weekly digest to ${recipients.length} user(s)`);
+      email.notifyWeeklyDigest(recipients).catch(err => console.error('[DIGEST] Error:', err));
+    }
+  } catch (err) {
+    console.error('[DIGEST] Job error:', err);
+  }
+}
+
+setTimeout(runWeeklyDigest, 60 * 1000); // first check 60 s after startup
+setInterval(runWeeklyDigest, REMINDER_POLL_MS);
 
 // --- Admin: Audit Log ---
 
