@@ -654,6 +654,9 @@ function renderComments(comments) {
   const existing = document.getElementById('loadMoreCommentsBtn');
   if (existing) existing.remove();
 
+  const counter = document.getElementById('commentsCount');
+  if (counter) counter.textContent = comments.length > 0 ? `(${comments.length})` : '';
+
   if (comments.length === 0) {
     const empty = document.createElement('p');
     empty.className = 'comments-empty';
@@ -1659,6 +1662,27 @@ function setupCollapsibleSections() {
     toggle.addEventListener('click', () => {
       const section = toggle.closest('.sidebar-collapsible');
       section.classList.toggle('collapsed');
+    });
+  });
+
+  document.querySelectorAll('.card-page-collapsible').forEach(section => {
+    const id = section.id;
+    const storageKey = id ? `card_section_collapsed_${id}` : null;
+    if (storageKey && localStorage.getItem(storageKey) === '1') {
+      section.classList.add('collapsed');
+    }
+    const toggle = section.querySelector('.card-page-collapsible-toggle');
+    if (!toggle) return;
+    toggle.addEventListener('click', (e) => {
+      if (e.target.closest('.desc-preview-btn')) return;
+      section.classList.toggle('collapsed');
+      if (storageKey) {
+        if (section.classList.contains('collapsed')) {
+          localStorage.setItem(storageKey, '1');
+        } else {
+          localStorage.removeItem(storageKey);
+        }
+      }
     });
   });
 }

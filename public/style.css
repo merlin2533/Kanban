@@ -1893,6 +1893,35 @@ main#board {
   margin-bottom: 10px;
 }
 
+/* Collapsible main-body sections (Description, Comments, ...) */
+.card-page-collapsible .card-page-collapsible-toggle {
+  cursor: pointer;
+  user-select: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.card-page-collapsible .card-page-collapse-icon {
+  font-size: 9px;
+  display: inline-block;
+  transition: transform 0.2s;
+}
+.card-page-collapsible.collapsed .card-page-collapse-icon {
+  transform: rotate(-90deg);
+}
+.card-page-collapsible.collapsed .card-page-collapsible-body {
+  display: none;
+}
+.card-page-collapsible.collapsed .desc-preview-btn {
+  display: none;
+}
+.comments-count {
+  font-weight: 600;
+  color: var(--color-text-faint);
+  margin-left: 4px;
+  text-transform: none;
+}
+
 /* Description */
 .card-page-description {
   width: 100%;
