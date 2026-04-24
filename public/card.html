@@ -35,14 +35,13 @@
         <!-- Title -->
         <div class="card-page-title-row">
           <input id="cardTitle" class="card-page-title-input" type="text" placeholder="Kartentitel..." aria-label="Kartentitel">
-          <button id="saveTemplateBtn" class="save-template-btn" title="Aktuelle Karte als Vorlage speichern" style="display:none;">Als Vorlage speichern</button>
         </div>
 
         <!-- Description -->
-        <section class="card-page-section card-page-collapsible collapsed" id="descriptionSection">
+        <section class="card-page-section" id="descriptionSection">
           <div class="card-page-section-header">
-            <h3 class="card-page-section-label card-page-collapsible-toggle">
-              <span class="card-page-collapse-icon">&#9660;</span> Beschreibung
+            <h3 class="card-page-section-label">
+              Beschreibung
             </h3>
             <button id="descPreviewBtn" class="desc-preview-btn" title="Vorschau umschalten">Vorschau</button>
           </div>
@@ -62,9 +61,9 @@
         </section>
 
         <!-- Comments -->
-        <section class="card-page-section card-page-collapsible collapsed" id="commentsSection">
-          <h3 class="card-page-section-label card-page-collapsible-toggle">
-            <span class="card-page-collapse-icon">&#9660;</span> Kommentare <span id="commentsCount" class="comments-count"></span>
+        <section class="card-page-section" id="commentsSection">
+          <h3 class="card-page-section-label">
+            Kommentare <span id="commentsCount" class="comments-count"></span>
           </h3>
           <div class="card-page-collapsible-body">
           <!-- Input first so new comments are added at top (newest first) -->
@@ -100,6 +99,14 @@
 
       <!-- Right: Sidebar -->
       <aside class="card-page-sidebar">
+
+        <!-- Mobile toggle (visible only on mobile) -->
+        <button class="sidebar-mobile-toggle" id="sidebarMobileToggle" aria-label="Details ein-/ausblenden">
+          <span>&#9776; Details</span>
+          <span class="sidebar-mobile-toggle-icon">&#9660;</span>
+        </button>
+
+        <div class="sidebar-content" id="sidebarContent">
 
         <!-- Status badge (archived) -->
         <div id="archivedBadge" class="archived-badge hidden">Archiviert</div>
@@ -229,6 +236,11 @@
           </div>
         </section>
 
+        <!-- Template -->
+        <section class="sidebar-section" id="templateSection" style="display:none;">
+          <button id="saveTemplateBtn" class="save-template-btn sidebar-template-btn" title="Aktuelle Karte als Vorlage speichern">&#128203; Als Vorlage speichern</button>
+        </section>
+
         <!-- Actions — collapsible -->
         <section class="sidebar-section sidebar-collapsible collapsed sidebar-actions">
           <h3 class="sidebar-section-label sidebar-collapsible-toggle">Aktionen <span class="sidebar-collapse-icon">&#9660;</span></h3>
@@ -239,6 +251,7 @@
           </div>
         </section>
 
+        </div><!-- /sidebar-content -->
       </aside>
     </div>
   </main>

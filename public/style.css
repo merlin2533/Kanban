@@ -2502,7 +2502,6 @@ body.bulk-mode-active #board {
   background: #f8fafc;
   color: #475569;
   cursor: pointer;
-  margin-left: 8px;
   white-space: nowrap;
   transition: background 0.15s, border-color 0.15s;
 }
@@ -2511,9 +2510,55 @@ body.bulk-mode-active #board {
   border-color: #2563eb;
   color: #2563eb;
 }
+.sidebar-template-btn {
+  width: 100%;
+  text-align: center;
+  padding: 7px 12px;
+  font-size: 13px;
+  margin-left: 0;
+}
 @media (prefers-color-scheme: dark) {
   .save-template-btn { background: #1e293b; border-color: #334155; color: #94a3b8; }
   .save-template-btn:hover { background: #1e3a5f; border-color: #3b82f6; color: #93c5fd; }
+}
+
+/* --- Sidebar mobile toggle --- */
+.sidebar-mobile-toggle {
+  display: none;
+  width: 100%;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--color-border);
+  padding: 6px 0 10px;
+  margin-bottom: 0;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--color-text-muted);
+  align-items: center;
+  justify-content: space-between;
+  user-select: none;
+}
+.sidebar-mobile-toggle-icon {
+  font-size: 9px;
+  display: inline-block;
+  transition: transform 0.2s;
+}
+@media (max-width: 768px) {
+  .sidebar-mobile-toggle {
+    display: flex;
+  }
+  .sidebar-content {
+    margin-top: 10px;
+  }
+  .card-page-sidebar.sidebar-mobile-collapsed .sidebar-mobile-toggle-icon {
+    transform: rotate(-90deg);
+  }
+  .card-page-sidebar.sidebar-mobile-collapsed .sidebar-content {
+    display: none;
+  }
 }
 
 /* --- Überfällig-Styles --- */
