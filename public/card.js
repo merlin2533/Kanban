@@ -1648,13 +1648,35 @@ async function saveAsTemplate() {
 
 function setupTemplateButton() {
   const btn = document.getElementById('saveTemplateBtn');
+  const section = document.getElementById('templateSection');
   if (!btn) return;
   if (canEdit()) {
     btn.style.display = '';
+    if (section) section.style.display = '';
     btn.onclick = saveAsTemplate;
   } else {
     btn.style.display = 'none';
+    if (section) section.style.display = 'none';
   }
+}
+
+function setupSidebarMobileToggle() {
+  const toggleBtn = document.getElementById('sidebarMobileToggle');
+  if (!toggleBtn) return;
+  const sidebar = toggleBtn.closest('.card-page-sidebar');
+  const storageKey = 'sidebar_mobile_expanded';
+  // Default: collapsed on mobile (toggle is only visible on mobile via CSS)
+  if (localStorage.getItem(storageKey) !== '1') {
+    sidebar.classList.add('sidebar-mobile-collapsed');
+  }
+  toggleBtn.addEventListener('click', () => {
+    sidebar.classList.toggle('sidebar-mobile-collapsed');
+    if (sidebar.classList.contains('sidebar-mobile-collapsed')) {
+      localStorage.removeItem(storageKey);
+    } else {
+      localStorage.setItem(storageKey, '1');
+    }
+  });
 }
 
 function setupCollapsibleSections() {
@@ -1718,6 +1740,7 @@ if (!boardId || !cardId) {
     setupSSE();
     setupNotificationCheck();
     setupTemplateButton();
+    setupSidebarMobileToggle();
     setupCollapsibleSections();
     // Watch button
     loadWatchStatus();
