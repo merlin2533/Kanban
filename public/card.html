@@ -39,7 +39,7 @@
         </div>
 
         <!-- Description -->
-        <section class="card-page-section card-page-collapsible" id="descriptionSection">
+        <section class="card-page-section card-page-collapsible collapsed" id="descriptionSection">
           <div class="card-page-section-header">
             <h3 class="card-page-section-label card-page-collapsible-toggle">
               <span class="card-page-collapse-icon">&#9660;</span> Beschreibung
@@ -62,7 +62,7 @@
         </section>
 
         <!-- Comments -->
-        <section class="card-page-section card-page-collapsible" id="commentsSection">
+        <section class="card-page-section card-page-collapsible collapsed" id="commentsSection">
           <h3 class="card-page-section-label card-page-collapsible-toggle">
             <span class="card-page-collapse-icon">&#9660;</span> Kommentare <span id="commentsCount" class="comments-count"></span>
           </h3>
@@ -104,56 +104,66 @@
         <!-- Status badge (archived) -->
         <div id="archivedBadge" class="archived-badge hidden">Archiviert</div>
 
-        <!-- Assignees — most important, always visible at top -->
-        <section class="sidebar-section" id="assigneesSection">
-          <h3 class="sidebar-section-label">Zugewiesen an</h3>
-          <div id="cardAssignees" class="assignee-list"></div>
-          <select id="assignUserSelect" class="sidebar-input" aria-label="Benutzer zuweisen" style="margin-top:8px;">
-            <option value="">+ Benutzer zuweisen...</option>
-          </select>
+        <!-- Assignees -->
+        <section class="sidebar-section sidebar-collapsible collapsed" id="assigneesSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Zugewiesen an <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div id="cardAssignees" class="assignee-list"></div>
+            <select id="assignUserSelect" class="sidebar-input" aria-label="Benutzer zuweisen" style="margin-top:8px;">
+              <option value="">+ Benutzer zuweisen...</option>
+            </select>
+          </div>
         </section>
 
         <!-- Due Date -->
-        <section class="sidebar-section">
-          <h3 class="sidebar-section-label">Fälligkeitsdatum</h3>
-          <input type="date" id="cardDueDate" class="sidebar-input" aria-label="Fälligkeitsdatum">
+        <section class="sidebar-section sidebar-collapsible collapsed" id="dueDateSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Fälligkeitsdatum <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <input type="date" id="cardDueDate" class="sidebar-input" aria-label="Fälligkeitsdatum">
+          </div>
         </section>
 
         <!-- Priority -->
-        <section class="sidebar-section">
-          <h3 class="sidebar-section-label">Priorität</h3>
-          <div class="priority-select" id="prioritySelect">
-            <button data-priority="" class="priority-btn priority-none active">Keine</button>
-            <button data-priority="low" class="priority-btn priority-low">Niedrig</button>
-            <button data-priority="medium" class="priority-btn priority-medium">Mittel</button>
-            <button data-priority="high" class="priority-btn priority-high">Hoch</button>
+        <section class="sidebar-section sidebar-collapsible collapsed" id="prioritySection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Priorität <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div class="priority-select" id="prioritySelect">
+              <button data-priority="" class="priority-btn priority-none active">Keine</button>
+              <button data-priority="low" class="priority-btn priority-low">Niedrig</button>
+              <button data-priority="medium" class="priority-btn priority-medium">Mittel</button>
+              <button data-priority="high" class="priority-btn priority-high">Hoch</button>
+            </div>
           </div>
         </section>
 
         <!-- Labels -->
-        <section class="sidebar-section">
-          <h3 class="sidebar-section-label">Labels</h3>
-          <div id="cardLabels" class="card-labels-list"></div>
-          <div class="label-picker" id="labelPicker">
-            <button id="addLabelBtn" class="add-label-btn">+ Label</button>
-            <div id="labelDropdown" class="label-dropdown hidden">
-              <div id="boardLabelsList" class="board-labels-list"></div>
-              <div class="new-label-row">
-                <input id="newLabelName" type="text" placeholder="Neues Label..." maxlength="100" aria-label="Label-Name">
-                <input id="newLabelColor" type="color" value="#2563eb" aria-label="Label-Farbe">
-                <button id="createLabelBtn">+</button>
+        <section class="sidebar-section sidebar-collapsible collapsed" id="labelsSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Labels <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div id="cardLabels" class="card-labels-list"></div>
+            <div class="label-picker" id="labelPicker">
+              <button id="addLabelBtn" class="add-label-btn">+ Label</button>
+              <div id="labelDropdown" class="label-dropdown hidden">
+                <div id="boardLabelsList" class="board-labels-list"></div>
+                <div class="new-label-row">
+                  <input id="newLabelName" type="text" placeholder="Neues Label..." maxlength="100" aria-label="Label-Name">
+                  <input id="newLabelColor" type="color" value="#2563eb" aria-label="Label-Farbe">
+                  <button id="createLabelBtn">+</button>
+                </div>
               </div>
             </div>
           </div>
         </section>
 
         <!-- Checklist -->
-        <section class="sidebar-section">
-          <h3 class="sidebar-section-label">Checkliste <span id="checklistProgress"></span></h3>
-          <div id="checklistItems"></div>
-          <div class="add-row" style="margin-top:8px;">
-            <input id="checklistInput" type="text" placeholder="Neues Item..." aria-label="Neues Checklist-Item">
-            <button id="addChecklistBtn">+</button>
+        <section class="sidebar-section sidebar-collapsible collapsed" id="checklistSection">
+          <h3 class="sidebar-section-label sidebar-collapsible-toggle">Checkliste <span id="checklistProgress"></span> <span class="sidebar-collapse-icon">&#9660;</span></h3>
+          <div class="sidebar-collapsible-body">
+            <div id="checklistItems"></div>
+            <div class="add-row" style="margin-top:8px;">
+              <input id="checklistInput" type="text" placeholder="Neues Item..." aria-label="Neues Checklist-Item">
+              <button id="addChecklistBtn">+</button>
+            </div>
           </div>
         </section>
 

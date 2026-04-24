@@ -748,6 +748,7 @@ function renderDependencies(deps) {
     <div class="sidebar-collapsible-body"></div>
   `;
   section.classList.toggle('collapsed', wasCollapsed);
+  section.dataset.collapsibleBound = '1';
   const toggle = section.querySelector('.sidebar-collapsible-toggle');
   toggle.style.cursor = 'pointer';
   toggle.addEventListener('click', () => section.classList.toggle('collapsed'));
@@ -1657,33 +1658,37 @@ function setupTemplateButton() {
 }
 
 function setupCollapsibleSections() {
-  document.querySelectorAll('.sidebar-collapsible .sidebar-collapsible-toggle').forEach(toggle => {
-    toggle.style.cursor = 'pointer';
-    toggle.addEventListener('click', () => {
-      const section = toggle.closest('.sidebar-collapsible');
-      section.classList.toggle('collapsed');
-    });
-  });
-
-  document.querySelectorAll('.card-page-collapsible').forEach(section => {
+  // Default is collapsed; if user previously expanded a section, restore that.
+  const bind = (section, toggleSelector, bodyFilterFn) => {
+    if (section.dataset.collapsibleBound === '1') return;
+    section.dataset.collapsibleBound = '1';
     const id = section.id;
-    const storageKey = id ? `card_section_collapsed_${id}` : null;
+    const storageKey = id ? `card_section_expanded_${id}` : null;
     if (storageKey && localStorage.getItem(storageKey) === '1') {
-      section.classList.add('collapsed');
+      section.classList.remove('collapsed');
     }
-    const toggle = section.querySelector('.card-page-collapsible-toggle');
+    const toggle = section.querySelector(toggleSelector);
     if (!toggle) return;
+    toggle.style.cursor = 'pointer';
     toggle.addEventListener('click', (e) => {
-      if (e.target.closest('.desc-preview-btn')) return;
+      if (bodyFilterFn && bodyFilterFn(e)) return;
       section.classList.toggle('collapsed');
       if (storageKey) {
         if (section.classList.contains('collapsed')) {
-          localStorage.setItem(storageKey, '1');
-        } else {
           localStorage.removeItem(storageKey);
+        } else {
+          localStorage.setItem(storageKey, '1');
         }
       }
     });
+  };
+
+  document.querySelectorAll('.sidebar-collapsible').forEach(section => {
+    bind(section, '.sidebar-collapsible-toggle');
+  });
+
+  document.querySelectorAll('.card-page-collapsible').forEach(section => {
+    bind(section, '.card-page-collapsible-toggle', (e) => !!e.target.closest('.desc-preview-btn'));
   });
 }
 
