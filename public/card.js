@@ -603,6 +603,11 @@ async function loadComments(append = false) {
   const container = document.getElementById('commentsList');
   if (!container) return;
 
+  // Mark comments as seen (comments are DESC ordered, so index 0 is newest)
+  if (!append && comments.length > 0) {
+    lsSet('seenComments_' + cardId, comments[0].created_at);
+  }
+
   if (!append) {
     container.innerHTML = '';
     // Remove any existing load-more button
