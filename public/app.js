@@ -1679,9 +1679,14 @@ function createCardEl(card) {
   }
 
   if (card.comments && card.comments.length > 0) {
+    const newestTs = card.comments[0].created_at; // DESC ordered, index 0 is newest
+    const seen = lsGet('seenComments_' + card.id);
+    const hasNew = !seen || newestTs > seen;
+    if (hasNew) div.classList.add('card-new-comments');
     const commentSpan = document.createElement('span');
     commentSpan.textContent = `\uD83D\uDCAC ${card.comments.length}`;
     commentSpan.title = 'Kommentare';
+    if (hasNew) commentSpan.classList.add('comment-badge-new');
     meta.appendChild(commentSpan);
     hasMeta = true;
   }
