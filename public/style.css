@@ -524,6 +524,12 @@ main#board {
 .add-row button:hover { background: #1d4ed8; }
 
 /* --- Attachments --- */
+#attachmentsList {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
 .attachment-item {
   display: flex;
   align-items: center;

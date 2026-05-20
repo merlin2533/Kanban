@@ -679,7 +679,7 @@ function getBoard(id) {
       `SELECT * FROM checklist_items WHERE card_id IN (${cardPlaceholders}) ORDER BY position`
     ).all(...cardIds);
     allAttachments = db.prepare(
-      `SELECT * FROM attachments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at`
+      `SELECT * FROM attachments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at DESC`
     ).all(...cardIds);
     allCardLabels = db.prepare(
       `SELECT cl.card_id, l.* FROM card_labels cl JOIN labels l ON cl.label_id = l.id WHERE cl.card_id IN (${cardPlaceholders})`
