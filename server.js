@@ -1099,6 +1099,18 @@ app.delete('/api/checklist/:itemId', authMiddleware, requireEdit, (req, res) => 
   res.json({ ok: true });
 });
 
+app.put('/api/cards/:cardId/checklist/reorder', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const ids = Array.isArray(req.body.orderedIds) ? req.body.orderedIds.map(v => validId(v)).filter(Boolean) : null;
+  if (!ids || ids.length === 0) return res.status(400).json({ error: 'orderedIds required' });
+  const ok = db.reorderChecklistItems(id, ids);
+  if (!ok) return res.status(404).json({ error: 'No matching items' });
+  const boardId = db.getCardBoardId(id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'checklist_reordered' });
+  res.json({ ok: true });
+});
+
 // --- Comments ---
 app.get('/api/cards/:cardId/comments', authMiddleware, (req, res) => {
   const id = validId(req.params.cardId);
@@ -1381,6 +1393,18 @@ app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
   // Attachment data was stored in DB – no filesystem cleanup needed
   const boardId = db.getCardBoardId(att.card_id);
   if (boardId) broadcast(boardId, { type: 'update', action: 'attachment_deleted' });
+  res.json({ ok: true });
+});
+
+app.put('/api/cards/:cardId/attachments/reorder', authMiddleware, requireEdit, (req, res) => {
+  const id = validId(req.params.cardId);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const ids = Array.isArray(req.body.orderedIds) ? req.body.orderedIds.map(v => validId(v)).filter(Boolean) : null;
+  if (!ids || ids.length === 0) return res.status(400).json({ error: 'orderedIds required' });
+  const ok = db.reorderAttachments(id, ids);
+  if (!ok) return res.status(404).json({ error: 'No matching attachments' });
+  const boardId = db.getCardBoardId(id);
+  if (boardId) broadcast(boardId, { type: 'update', action: 'attachments_reordered' });
   res.json({ ok: true });
 });
 

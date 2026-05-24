@@ -321,6 +321,25 @@ try {
   console.log('[Migration] Added file_data column to attachments table');
 }
 
+// Migration: add position column to attachments for manual ordering
+try {
+  db.prepare("SELECT position FROM attachments LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE attachments ADD COLUMN position INTEGER NOT NULL DEFAULT 0");
+  // Backfill: assign positions per card based on existing created_at DESC order
+  // (newest first matches what users currently see)
+  const cards = db.prepare("SELECT DISTINCT card_id FROM attachments").all();
+  const setPos = db.prepare("UPDATE attachments SET position = ? WHERE id = ?");
+  const fillTx = db.transaction(() => {
+    for (const { card_id } of cards) {
+      const rows = db.prepare("SELECT id FROM attachments WHERE card_id = ? ORDER BY created_at DESC, id DESC").all(card_id);
+      rows.forEach((row, idx) => setPos.run(idx, row.id));
+    }
+  });
+  fillTx();
+  console.log('[Migration] Added position column to attachments table');
+}
+
 // Migration: add role column to board_members
 try {
   db.prepare("SELECT role FROM board_members LIMIT 1").get();
@@ -679,7 +698,7 @@ function getBoard(id) {
       `SELECT * FROM checklist_items WHERE card_id IN (${cardPlaceholders}) ORDER BY position`
     ).all(...cardIds);
     allAttachments = db.prepare(
-      `SELECT * FROM attachments WHERE card_id IN (${cardPlaceholders}) ORDER BY created_at DESC`
+      `SELECT id, card_id, filename, filepath, mimetype, size, created_at, position FROM attachments WHERE card_id IN (${cardPlaceholders}) ORDER BY position ASC, created_at DESC`
     ).all(...cardIds);
     allCardLabels = db.prepare(
       `SELECT cl.card_id, l.* FROM card_labels cl JOIN labels l ON cl.label_id = l.id WHERE cl.card_id IN (${cardPlaceholders})`
@@ -1001,19 +1020,57 @@ function deleteChecklistItem(id) {
   return item;
 }
 
+function reorderChecklistItems(cardId, orderedIds) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return false;
+  const existing = db.prepare('SELECT id FROM checklist_items WHERE card_id = ?').all(cardId).map(r => r.id);
+  const valid = orderedIds.filter(id => existing.includes(id));
+  if (valid.length === 0) return false;
+  const setPos = db.prepare('UPDATE checklist_items SET position = ? WHERE id = ? AND card_id = ?');
+  const tx = db.transaction(() => {
+    valid.forEach((id, idx) => setPos.run(idx, id, cardId));
+    let next = valid.length;
+    for (const id of existing) {
+      if (!valid.includes(id)) setPos.run(next++, id, cardId);
+    }
+  });
+  tx();
+  return true;
+}
+
 // --- Attachments ---
 
 // Store file content as BLOB in the DB (memoryStorage: file.buffer is available)
 function createAttachment(cardId, file) {
   const card = db.prepare('SELECT * FROM cards WHERE id = ?').get(cardId);
   if (!card) return null;
+  // New attachments go to the top: shift existing positions down by 1
+  db.prepare('UPDATE attachments SET position = position + 1 WHERE card_id = ?').run(cardId);
   const result = db.prepare(
-    'INSERT INTO attachments (card_id, filename, filepath, mimetype, size, file_data) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO attachments (card_id, filename, filepath, mimetype, size, file_data, position) VALUES (?, ?, ?, ?, ?, ?, 0)'
   ).run(cardId, file.originalname, '', file.mimetype, file.size, file.buffer);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(card.column_id);
   if (col) logActivity(col.board_id, 'file_uploaded', { cardText: card.text, filename: file.originalname });
   // Return metadata only (exclude blob from response)
-  return db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at FROM attachments WHERE id = ?').get(result.lastInsertRowid);
+  return db.prepare('SELECT id, card_id, filename, filepath, mimetype, size, created_at, position FROM attachments WHERE id = ?').get(result.lastInsertRowid);
+}
+
+function reorderAttachments(cardId, orderedIds) {
+  if (!Array.isArray(orderedIds) || orderedIds.length === 0) return false;
+  const existing = db.prepare('SELECT id FROM attachments WHERE card_id = ?').all(cardId).map(r => r.id);
+  // Only reorder ids that actually belong to this card
+  const valid = orderedIds.filter(id => existing.includes(id));
+  if (valid.length === 0) return false;
+  const setPos = db.prepare('UPDATE attachments SET position = ? WHERE id = ? AND card_id = ?');
+  const tx = db.transaction(() => {
+    valid.forEach((id, idx) => setPos.run(idx, id, cardId));
+    // Push any unreferenced ids to the end (defensive – keeps them visible)
+    let next = valid.length;
+    for (const id of existing) {
+      if (!valid.includes(id)) setPos.run(next++, id, cardId);
+    }
+  });
+  tx();
+  return true;
 }
 
 // Return metadata only (no blob)
@@ -1703,9 +1760,9 @@ module.exports = {
   // Cards
   createCard, updateCard, deleteCard, moveCard, duplicateCard, logTime,
   // Checklist
-  getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem,
+  getChecklist, createChecklistItem, updateChecklistItem, deleteChecklistItem, reorderChecklistItems,
   // Attachments
-  createAttachment, getAttachment, getAttachmentData, deleteAttachment,
+  createAttachment, getAttachment, getAttachmentData, deleteAttachment, reorderAttachments,
   getCardAttachmentPaths, getBoardAttachmentPaths, migrateFilesystemAttachments,
   // Labels
   getLabels, createLabel, updateLabel, deleteLabel, addLabelToCard, removeLabelFromCard, getCardLabels,

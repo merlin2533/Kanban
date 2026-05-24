@@ -2789,3 +2789,219 @@ body.bulk-mode-active #board {
   line-height: 1;
 }
 .lightbox-close:hover { background: #334155; color: #fff; }
+
+/* =========================================
+   Drag & Drop: file upload onto textareas
+   and sortable list items (attachments, checklist)
+   ========================================= */
+
+/* Textarea drag-and-drop file upload feedback */
+.card-page-description.drag-active,
+.card-page-comment-input.drag-active,
+.comment-edit-area.drag-active {
+  outline: 2px dashed var(--color-primary);
+  outline-offset: -4px;
+  background: rgba(37, 99, 235, 0.06);
+}
+@media (prefers-color-scheme: dark) {
+  .card-page-description.drag-active,
+  .card-page-comment-input.drag-active,
+  .comment-edit-area.drag-active {
+    background: rgba(96, 165, 250, 0.12);
+  }
+}
+
+/* Drag handle inside sortable items */
+.drag-handle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  color: var(--color-text-faint);
+  cursor: grab;
+  user-select: none;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: var(--radius-sm);
+  flex-shrink: 0;
+  touch-action: none;
+}
+.drag-handle:hover { color: var(--color-text); background: var(--color-surface-alt); }
+.drag-handle:active { cursor: grabbing; }
+
+/* Sortable items state */
+.sortable-dragging {
+  opacity: 0.4;
+}
+.sortable-touch-clone {
+  box-shadow: 0 6px 20px rgba(0,0,0,0.25);
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+}
+
+/* Attachment item: make room for drag handle */
+.attachment-item { position: relative; }
+.attachment-item .drag-handle {
+  margin-right: 4px;
+}
+
+/* Checklist item layout already uses flex */
+.checklist-item .drag-handle {
+  margin-right: 4px;
+}
+
+/* Touch targets on coarse pointers — make drag handle bigger */
+@media (pointer: coarse) {
+  .drag-handle {
+    width: 30px;
+    min-width: 30px;
+    height: 30px;
+    font-size: 16px;
+  }
+}
+
+/* =========================================
+   Responsive improvements: tablet + mobile
+   ========================================= */
+
+/* Tablet breakpoint: sidebar narrower so main column has room */
+@media (max-width: 1024px) and (min-width: 769px) {
+  .card-page-main {
+    padding: 24px 18px 50px;
+  }
+  .card-page-layout {
+    grid-template-columns: 1fr 260px;
+    gap: 24px;
+  }
+}
+
+/* Mobile refinements (extend the existing 768px block) */
+@media (max-width: 768px) {
+  /* Card detail */
+  .card-page-main {
+    padding: 12px 10px 40px;
+  }
+  .card-page-section {
+    margin-bottom: 18px;
+  }
+  .card-page-section-label {
+    font-size: 11px;
+  }
+  .card-page-title-input {
+    font-size: 17px;
+    padding: 6px 4px;
+  }
+  .card-page-description {
+    min-height: 160px;
+    padding: 10px 12px;
+    font-size: 15px; /* prevent iOS zoom on focus */
+  }
+  .card-page-comment-input {
+    min-height: 70px;
+    font-size: 15px;
+    padding: 10px 12px;
+  }
+  .card-page-sidebar {
+    padding: 14px;
+    border-radius: var(--radius-md);
+  }
+  .sidebar-input {
+    font-size: 15px; /* prevent iOS zoom */
+    padding: 9px 10px;
+  }
+  /* Bigger touch targets for buttons */
+  .btn-primary,
+  .btn-secondary,
+  .archive-btn,
+  .restore-btn,
+  .danger-btn,
+  .btn-move {
+    min-height: 38px;
+    padding: 9px 16px;
+  }
+  .md-btn {
+    padding: 6px 10px;
+    font-size: 14px;
+    min-width: 32px;
+  }
+  /* Markdown toolbar wraps cleanly on small screens */
+  .md-toolbar {
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+  /* Attachments more compact */
+  .attachment-item {
+    padding: 6px;
+  }
+  .attachment-thumb,
+  .attachment-icon {
+    width: 44px;
+    height: 44px;
+  }
+  /* Header buttons easier to tap */
+  .header-actions .icon-btn {
+    min-width: 32px;
+    min-height: 32px;
+  }
+  /* Comments header time wraps when room is tight */
+  .comment-header-time {
+    margin-left: auto;
+  }
+}
+
+/* Very small phones */
+@media (max-width: 480px) {
+  .card-page-board-title {
+    font-size: 13px;
+  }
+  .card-page-main {
+    padding: 8px 8px 40px;
+  }
+  .card-page-title-input {
+    font-size: 16px;
+  }
+  .card-page-description {
+    min-height: 140px;
+  }
+  /* Comment form footer stacks (already done at 768px); shrink button */
+  .card-page-comment-form-footer .btn-primary {
+    width: 100%;
+  }
+  /* Sidebar full-width buttons get bigger */
+  .archive-btn,
+  .restore-btn,
+  .danger-btn {
+    font-size: 14px;
+  }
+  /* Time-tracking row stays usable */
+  .time-tracking-row {
+    gap: 8px;
+  }
+  .time-field input[type="number"] {
+    width: 100%;
+  }
+  /* Priority buttons wrap & full-width-ish */
+  .priority-select {
+    gap: 4px;
+  }
+  .priority-btn {
+    flex: 1 1 calc(50% - 4px);
+    min-width: 0;
+    text-align: center;
+  }
+  /* Lightbox controls more reachable */
+  .lightbox-footer {
+    flex-wrap: wrap;
+    padding: 8px 10px;
+  }
+  /* Modals: a bit more breathing room */
+  .modal-footer {
+    flex-direction: column-reverse;
+    align-items: stretch;
+  }
+  .modal-footer button {
+    width: 100%;
+  }
+}

@@ -244,27 +244,68 @@ function insertAtCursor(textarea, text) {
   textarea.selectionStart = textarea.selectionEnd = start + text.length;
 }
 
+async function uploadFileToTextarea(file, textarea, afterUpload) {
+  if (!file) return;
+  const isImage = file.type && file.type.startsWith('image/');
+  const placeholder = isImage
+    ? '![Bild wird hochgeladen...]()'
+    : `[${file.name || 'Datei'} wird hochgeladen...]()`;
+  insertAtCursor(textarea, placeholder);
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
+    const md = isImage
+      ? `![${att.filename}](/api/attachments/${att.id})`
+      : `[${att.filename}](/api/attachments/${att.id})`;
+    textarea.value = textarea.value.replace(placeholder, md);
+    textarea.dispatchEvent(new Event('input'));
+    if (afterUpload) await afterUpload();
+  } catch (err) {
+    textarea.value = textarea.value.replace(placeholder, '');
+    showError('Upload fehlgeschlagen: ' + err.message);
+  }
+}
+
 async function handleImagePaste(e, textarea, afterUpload) {
   const items = Array.from(e.clipboardData ? e.clipboardData.items : []);
   const imageItem = items.find(item => item.type.startsWith('image/'));
   if (!imageItem) return;
   e.preventDefault();
   const file = imageItem.getAsFile();
-  if (!file) return;
-  const placeholder = '![Bild wird hochgeladen...]()';
-  insertAtCursor(textarea, placeholder);
-  try {
-    const form = new FormData();
-    form.append('file', file);
-    const att = await api(`/api/cards/${cardId}/attachments`, 'POST', form);
-    const md = `![${att.filename}](/api/attachments/${att.id})`;
-    textarea.value = textarea.value.replace(placeholder, md);
-    textarea.dispatchEvent(new Event('input'));
-    if (afterUpload) await afterUpload();
-  } catch (err) {
-    textarea.value = textarea.value.replace(placeholder, '');
-    showError('Bild-Upload fehlgeschlagen: ' + err.message);
-  }
+  await uploadFileToTextarea(file, textarea, afterUpload);
+}
+
+// Enable drag & drop file upload onto a textarea. Files are uploaded as
+// attachments and linked into the textarea content as markdown.
+function enableTextareaFileDrop(textarea, afterUpload) {
+  if (!textarea) return;
+  const setActive = (on) => textarea.classList.toggle('drag-active', on);
+  textarea.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    setActive(true);
+  });
+  textarea.addEventListener('dragover', (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.types || !e.dataTransfer.types.includes('Files')) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    setActive(true);
+  });
+  textarea.addEventListener('dragleave', (e) => {
+    // Only deactivate when leaving the textarea itself
+    if (e.target === textarea) setActive(false);
+  });
+  textarea.addEventListener('drop', async (e) => {
+    if (!e.dataTransfer || !e.dataTransfer.files || !e.dataTransfer.files.length) return;
+    e.preventDefault();
+    setActive(false);
+    if (!canEdit()) { showError('Keine Berechtigung'); return; }
+    const files = Array.from(e.dataTransfer.files);
+    for (const file of files) {
+      await uploadFileToTextarea(file, textarea, afterUpload);
+    }
+  });
 }
 
 // --- Markdown toolbar ---
@@ -544,6 +585,7 @@ function renderComment(comment) {
       editArea.rows = 3;
       text.replaceWith(editArea);
       editArea.addEventListener('paste', (e) => handleImagePaste(e, editArea));
+      enableTextareaFileDrop(editArea);
       editArea.focus();
       const saveRow = document.createElement('div');
       saveRow.className = 'comment-edit-actions';
@@ -922,9 +964,24 @@ function renderChecklist(items) {
     container.appendChild(progressBar);
   }
   document.getElementById('checklistProgress').textContent = total > 0 ? `${done}/${total}` : '';
+  const editable = canEdit();
+  // Items live inside a dedicated wrapper so the progress bar is not draggable
+  const listWrap = document.createElement('div');
+  listWrap.className = 'checklist-items-sortable';
+  container.appendChild(listWrap);
   for (const item of items) {
     const row = document.createElement('div');
     row.className = 'checklist-item';
+    row.dataset.id = item.id;
+    if (editable) {
+      row.draggable = true;
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle';
+      handle.title = 'Ziehen zum Sortieren';
+      handle.setAttribute('aria-label', 'Ziehen zum Sortieren');
+      handle.textContent = '☰';
+      row.appendChild(handle);
+    }
     const cb = document.createElement('input');
     cb.type = 'checkbox';
     cb.checked = item.checked;
@@ -953,7 +1010,7 @@ function renderChecklist(items) {
 
     row.appendChild(cb);
     row.appendChild(textWrap);
-    if (canEdit()) {
+    if (editable) {
       const del = document.createElement('button');
       del.className = 'delete-item';
       del.innerHTML = '&times;';
@@ -965,7 +1022,12 @@ function renderChecklist(items) {
       };
       row.appendChild(del);
     }
-    container.appendChild(row);
+    listWrap.appendChild(row);
+  }
+  if (editable) {
+    makeSortable(listWrap, '.checklist-item', async (orderedIds) => {
+      await api(`/api/cards/${cardId}/checklist/reorder`, 'PUT', { orderedIds });
+    });
   }
 }
 
@@ -1020,9 +1082,20 @@ function openImageLightbox(src, filename) {
 function renderAttachments(attachments) {
   const container = document.getElementById('attachmentsList');
   container.innerHTML = '';
+  const editable = canEdit();
   for (const att of attachments) {
     const item = document.createElement('div');
     item.className = 'attachment-item';
+    item.dataset.id = att.id;
+    if (editable) {
+      item.draggable = true;
+      const handle = document.createElement('span');
+      handle.className = 'drag-handle';
+      handle.title = 'Ziehen zum Sortieren';
+      handle.setAttribute('aria-label', 'Ziehen zum Sortieren');
+      handle.textContent = '☰'; // ☰
+      item.appendChild(handle);
+    }
     if (att.mimetype && att.mimetype.startsWith('image/')) {
       const thumb = document.createElement('img');
       thumb.className = 'attachment-thumb';
@@ -1079,6 +1152,12 @@ function renderAttachments(attachments) {
     }
     container.appendChild(item);
   }
+  if (editable && !container._sortableInit) {
+    makeSortable(container, '.attachment-item', async (orderedIds) => {
+      await api(`/api/cards/${cardId}/attachments/reorder`, 'PUT', { orderedIds });
+    });
+    container._sortableInit = true;
+  }
 }
 
 async function uploadFiles() {
@@ -1105,6 +1184,138 @@ async function reloadAttachments() {
     card = findCard(cardId) || card;
     renderAttachments(card.attachments || []);
   } catch (e) { showError(e.message); }
+}
+
+// =====================================================
+// Generic sortable list helper – HTML5 drag/drop + touch
+// =====================================================
+// Makes children of `container` draggable (when itemSelector matches).
+// Each item must carry a `data-id` attribute. On drop, calls
+// `onReorder(orderedIds)` so the caller can persist the new order.
+function makeSortable(container, itemSelector, onReorder) {
+  if (!container) return;
+
+  let dragEl = null;
+  let touchClone = null;
+  let touchActive = false;
+
+  const getItems = () => Array.from(container.querySelectorAll(itemSelector));
+
+  function findInsertTarget(y) {
+    const items = getItems().filter(el => el !== dragEl);
+    for (const el of items) {
+      const rect = el.getBoundingClientRect();
+      if (y < rect.top + rect.height / 2) return el;
+    }
+    return null;
+  }
+
+  function commitOrder() {
+    const orderedIds = getItems().map(el => Number(el.dataset.id)).filter(Boolean);
+    if (orderedIds.length === 0) return;
+    Promise.resolve(onReorder(orderedIds)).catch(err => showError(err.message || 'Reorder fehlgeschlagen'));
+  }
+
+  // Delegate from container so dynamically added items work too
+  container.addEventListener('dragstart', (e) => {
+    const target = e.target.closest(itemSelector);
+    if (!target || !container.contains(target)) return;
+    if (!canEdit()) { e.preventDefault(); return; }
+    dragEl = target;
+    target.classList.add('sortable-dragging');
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      try { e.dataTransfer.setData('text/plain', target.dataset.id || ''); } catch {}
+    }
+  });
+
+  container.addEventListener('dragend', () => {
+    if (dragEl) dragEl.classList.remove('sortable-dragging');
+    dragEl = null;
+  });
+
+  container.addEventListener('dragover', (e) => {
+    if (!dragEl) return;
+    e.preventDefault();
+    if (e.dataTransfer) e.dataTransfer.dropEffect = 'move';
+    const target = findInsertTarget(e.clientY);
+    if (target == null) container.appendChild(dragEl);
+    else container.insertBefore(dragEl, target);
+  });
+
+  container.addEventListener('drop', (e) => {
+    if (!dragEl) return;
+    e.preventDefault();
+    dragEl.classList.remove('sortable-dragging');
+    dragEl = null;
+    commitOrder();
+  });
+
+  // --- Touch support ---
+  container.addEventListener('touchstart', (e) => {
+    const target = e.target.closest(itemSelector);
+    if (!target || !container.contains(target)) return;
+    // Only initiate drag from a handle if one exists; otherwise long-press
+    const handle = target.querySelector('.drag-handle');
+    if (handle && !e.target.closest('.drag-handle')) return;
+    if (!canEdit()) return;
+    dragEl = target;
+    const touch = e.touches[0];
+    target._touchStartY = touch.clientY;
+    target._touchTimer = setTimeout(() => {
+      touchActive = true;
+      target.classList.add('sortable-dragging');
+      touchClone = target.cloneNode(true);
+      touchClone.classList.add('sortable-touch-clone');
+      const rect = target.getBoundingClientRect();
+      touchClone.style.cssText =
+        `position:fixed;z-index:9999;pointer-events:none;opacity:0.85;left:${rect.left}px;top:${touch.clientY - rect.height/2}px;width:${rect.width}px;`;
+      document.body.appendChild(touchClone);
+    }, 250);
+  }, { passive: true });
+
+  container.addEventListener('touchmove', (e) => {
+    if (!dragEl) return;
+    if (!touchActive) {
+      // Cancel pending long-press if user just scrolls quickly
+      const touch = e.touches[0];
+      if (Math.abs(touch.clientY - (dragEl._touchStartY || 0)) > 12) {
+        clearTimeout(dragEl._touchTimer);
+        dragEl = null;
+      }
+      return;
+    }
+    e.preventDefault();
+    const touch = e.touches[0];
+    if (touchClone) {
+      touchClone.style.top = (touch.clientY - touchClone.offsetHeight / 2) + 'px';
+    }
+    const target = findInsertTarget(touch.clientY);
+    if (target == null) container.appendChild(dragEl);
+    else if (target !== dragEl) container.insertBefore(dragEl, target);
+  }, { passive: false });
+
+  container.addEventListener('touchend', () => {
+    if (!dragEl) return;
+    clearTimeout(dragEl._touchTimer);
+    if (touchClone) { touchClone.remove(); touchClone = null; }
+    if (touchActive) {
+      dragEl.classList.remove('sortable-dragging');
+      commitOrder();
+    }
+    touchActive = false;
+    dragEl = null;
+  });
+
+  container.addEventListener('touchcancel', () => {
+    if (dragEl) {
+      clearTimeout(dragEl._touchTimer);
+      dragEl.classList.remove('sortable-dragging');
+    }
+    if (touchClone) { touchClone.remove(); touchClone = null; }
+    touchActive = false;
+    dragEl = null;
+  });
 }
 
 function findCard(id) {
@@ -1383,10 +1594,12 @@ function setupEvents() {
   };
 
   // Image paste for description
-  descArea.addEventListener('paste', (e) => handleImagePaste(e, descArea, async () => {
+  const persistDescription = async () => {
     await api(`/api/cards/${cardId}`, 'PATCH', { description: descArea.value });
     card.description = descArea.value;
-  }));
+  };
+  descArea.addEventListener('paste', (e) => handleImagePaste(e, descArea, persistDescription));
+  enableTextareaFileDrop(descArea, persistDescription);
 
   // Due date
   document.getElementById('cardDueDate').onchange = async (e) => {
@@ -1491,6 +1704,7 @@ function setupEvents() {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); addComment(); }
   };
   commentInput.addEventListener('paste', (e) => handleImagePaste(e, commentInput));
+  enableTextareaFileDrop(commentInput);
 
   // Tipp-Indikator: bei Eingabe Typing-Signal in localStorage setzen (debounced)
   let typingDebounceTimer = null;
