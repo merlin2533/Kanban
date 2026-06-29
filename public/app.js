@@ -763,6 +763,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     document.querySelector('.header-actions').insertBefore(templateBtn, document.getElementById('activityBtn'));
   }
 
+  // Board Settings button (editors+)
+  if (canEditBoard()) {
+    const boardSettingsBtn = document.createElement('button');
+    boardSettingsBtn.className = 'icon-btn';
+    boardSettingsBtn.innerHTML = '&#9881;'; // gear ⚙
+    boardSettingsBtn.title = 'Board-Einstellungen';
+    boardSettingsBtn.onclick = toggleBoardSettingsPanel;
+    document.querySelector('.header-actions').insertBefore(boardSettingsBtn, document.getElementById('activityBtn'));
+  }
+
+  // Changed Cards filter button (shown only when changes exist)
+  const changedCardsBtn = document.createElement('button');
+  changedCardsBtn.className = 'icon-btn hidden';
+  changedCardsBtn.id = 'changedCardsBtn';
+  changedCardsBtn.onclick = toggleChangedCardsFilter;
+  document.querySelector('.header-actions').insertBefore(changedCardsBtn, document.getElementById('activityBtn'));
+
   // Bulk select mode
   let bulkMode = false;
   const selectedCards = new Set();
@@ -1281,6 +1298,9 @@ function renderBoard() {
   addColDiv.appendChild(addColInput);
   if (!canEditBoard()) addColDiv.style.display = 'none';
   boardEl.appendChild(addColDiv);
+
+  // Update changed-cards badge after rendering
+  if (typeof updateChangedCardsBtn === 'function') updateChangedCardsBtn();
 }
 
 // --- Column ---
@@ -1689,6 +1709,23 @@ function createCardEl(card) {
     if (hasNew) commentSpan.classList.add('comment-badge-new');
     meta.appendChild(commentSpan);
     hasMeta = true;
+  }
+
+  // Field-change indicator: show \u270F badge if card was updated after user last viewed it
+  if (card.updated_at) {
+    const seenAt = lsGet('seenCard_' + card.id);
+    if (seenAt === null) {
+      // First render: initialize without showing indicator
+      lsSet('seenCard_' + card.id, card.updated_at);
+    } else if (card.updated_at > seenAt) {
+      div.classList.add('card-field-changed');
+      const changedSpan = document.createElement('span');
+      changedSpan.className = 'field-changed-badge';
+      changedSpan.textContent = '\u270F'; // \u270F
+      changedSpan.title = 'Karte wurde ge\u00E4ndert';
+      meta.appendChild(changedSpan);
+      hasMeta = true;
+    }
   }
 
   if (card.assignees && card.assignees.length > 0) {
@@ -2215,6 +2252,8 @@ function setupModal() {
 
 async function openCardModal(card) {
   currentCardId = card.id;
+  // Mark card as seen so field-change indicator clears on next board render
+  if (card.updated_at) lsSet('seenCard_' + card.id, card.updated_at);
   document.getElementById('modalCardText').value = card.text;
   const descArea = document.getElementById('modalDescription');
   if (descArea) descArea.value = card.description || '';
@@ -3268,6 +3307,96 @@ async function addBoardMember() {
     document.getElementById('membersPanel').classList.add('hidden');
     toggleMembersPanel(); // refresh
   } catch (e) { showError(e.message); }
+}
+
+// --- Board Settings Panel (per-board, accessible to editors) ---
+async function toggleBoardSettingsPanel() {
+  let panel = document.getElementById('boardSettingsPanel');
+  if (panel && !panel.classList.contains('hidden')) {
+    panel.classList.add('hidden');
+    return;
+  }
+
+  if (!panel) {
+    panel = document.createElement('div');
+    panel.id = 'boardSettingsPanel';
+    panel.className = 'activity-panel';
+    panel.innerHTML = `
+      <div class="activity-header">
+        <h2>Board-Einstellungen</h2>
+        <button class="icon-btn" onclick="document.getElementById('boardSettingsPanel').classList.add('hidden')" aria-label="Schließen">&times;</button>
+      </div>
+      <div style="padding:16px 20px;">
+        <div style="margin-bottom:16px;">
+          <div style="font-weight:600;font-size:14px;margin-bottom:4px;">&#128231; Wochenzusammenfassung</div>
+          <p style="font-size:12px;color:#64748b;margin:0 0 10px;">Steuert, ob Benutzer für dieses Board eine wöchentliche E-Mail-Zusammenfassung erhalten. Die globale Einstellung gilt, wenn "Standard" gewählt ist.</p>
+          <select id="boardDigestSelect" style="padding:7px 10px;border:1px solid #e2e8f0;border-radius:6px;font-size:13px;width:100%;">
+            <option value="null">Standard (globale Einstellung)</option>
+            <option value="1">Aktiviert (für dieses Board)</option>
+            <option value="0">Deaktiviert (für dieses Board)</option>
+          </select>
+          <div style="margin-top:10px;display:flex;gap:8px;">
+            <button id="saveBoardDigestBtn" style="padding:7px 16px;background:#2563eb;color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:13px;">Speichern</button>
+            <span id="boardDigestStatus" style="font-size:12px;color:#22c55e;align-self:center;"></span>
+          </div>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(panel);
+  }
+
+  // Load current board digest setting
+  const current = board.weekly_digest_enabled;
+  const select = document.getElementById('boardDigestSelect');
+  select.value = current === null || current === undefined ? 'null' : String(current);
+
+  document.getElementById('saveBoardDigestBtn').onclick = async () => {
+    const raw = select.value;
+    const enabled = raw === 'null' ? null : raw === '1';
+    try {
+      await api(`/api/boards/${boardId}/digest-enabled`, 'PUT', { enabled });
+      board.weekly_digest_enabled = enabled === null ? null : (enabled ? 1 : 0);
+      const statusEl = document.getElementById('boardDigestStatus');
+      statusEl.textContent = 'Gespeichert ✓';
+      setTimeout(() => { statusEl.textContent = ''; }, 2500);
+    } catch (e) { showError(e.message); }
+  };
+
+  panel.classList.remove('hidden');
+}
+
+// --- Changed Cards Filter ---
+let changedCardsFilterActive = false;
+
+function updateChangedCardsBtn() {
+  const btn = document.getElementById('changedCardsBtn');
+  if (!btn) return;
+  const changed = document.querySelectorAll('.card-field-changed');
+  const count = changed.length;
+  if (count === 0) {
+    btn.classList.add('hidden');
+    // Auto-deactivate filter if no changed cards remain
+    if (changedCardsFilterActive) {
+      changedCardsFilterActive = false;
+      const boardEl = document.getElementById('board');
+      if (boardEl) boardEl.classList.remove('board-filter-changed');
+    }
+    return;
+  }
+  btn.classList.remove('hidden');
+  btn.innerHTML = `&#9998; ${count}`;
+  btn.title = `${count} geänderte Karte${count !== 1 ? 'n' : ''} – klicken zum Filtern`;
+  btn.classList.toggle('active', changedCardsFilterActive);
+  // Restore filter class after board re-render
+  const boardEl = document.getElementById('board');
+  if (boardEl) boardEl.classList.toggle('board-filter-changed', changedCardsFilterActive);
+}
+
+function toggleChangedCardsFilter() {
+  changedCardsFilterActive = !changedCardsFilterActive;
+  const boardEl = document.getElementById('board');
+  if (boardEl) boardEl.classList.toggle('board-filter-changed', changedCardsFilterActive);
+  updateChangedCardsBtn();
 }
 
 // Expose functions used in inline onclick handlers to global scope

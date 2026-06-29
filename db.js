@@ -361,6 +361,13 @@ try {
   db.exec("ALTER TABLE boards ADD COLUMN public_access TEXT DEFAULT NULL");
 }
 
+// Migration: per-board weekly digest override (NULL = follow global, 0 = off, 1 = on)
+try {
+  db.prepare("SELECT weekly_digest_enabled FROM boards LIMIT 1").get();
+} catch {
+  db.exec("ALTER TABLE boards ADD COLUMN weekly_digest_enabled INTEGER DEFAULT NULL");
+}
+
 // Migration: add time tracking columns to cards
 try { db.prepare('ALTER TABLE cards ADD COLUMN time_estimate INTEGER DEFAULT NULL').run(); } catch {}
 try { db.prepare('ALTER TABLE cards ADD COLUMN time_logged INTEGER DEFAULT NULL').run(); } catch {}
@@ -761,6 +768,13 @@ function getBoard(id) {
   board.labels = db.prepare('SELECT * FROM labels WHERE board_id = ? ORDER BY name').all(id);
   board.blockedCardIds = getBlockedCardIds(id);
   return board;
+}
+
+function updateBoardDigestSetting(id, enabled) {
+  // enabled: null (follow global), 0 (force off), 1 (force on)
+  const val = enabled === null ? null : (enabled ? 1 : 0);
+  db.prepare('UPDATE boards SET weekly_digest_enabled = ? WHERE id = ?').run(val, id);
+  return db.prepare('SELECT * FROM boards WHERE id = ?').get(id);
 }
 
 // Fix #9: updateBoard, deleteBoard, getBoards
@@ -1601,7 +1615,9 @@ function getCardsDueSoon(withinHours) {
 // Each entry: { user_id, username, email, cards: [...] }
 // where each card has: { id, text, board_title, column_title, due_date, priority,
 //                        is_overdue, is_due_this_week, new_comment_count }
-function getWeeklyDigestData() {
+function getWeeklyDigestData(globalEnabled) {
+  // globalEnabled: true when the global weekly_digest_enabled setting is '1'
+  // Per-board override: NULL = follow global, 0 = disabled, 1 = enabled
   const rows = db.prepare(`
     SELECT
       u.id      AS user_id,
@@ -1611,7 +1627,9 @@ function getWeeklyDigestData() {
       c.text    AS card_text,
       c.due_date,
       c.priority,
+      b.id      AS board_id,
       b.title   AS board_title,
+      b.weekly_digest_enabled AS board_digest_enabled,
       col.title AS column_title,
       (SELECT COUNT(*) FROM comments cm
          WHERE cm.card_id = c.id
@@ -1635,9 +1653,16 @@ function getWeeklyDigestData() {
     ORDER BY u.id, c.due_date ASC NULLS LAST
   `).all();
 
+  // Apply per-board digest override
+  const filtered = rows.filter(row => {
+    if (row.board_digest_enabled === 1) return true;   // explicitly enabled
+    if (row.board_digest_enabled === 0) return false;  // explicitly disabled
+    return !!globalEnabled;                             // NULL → follow global
+  });
+
   // Group by user
   const byUser = new Map();
-  for (const row of rows) {
+  for (const row of filtered) {
     if (!byUser.has(row.user_id)) {
       byUser.set(row.user_id, { user_id: row.user_id, username: row.username, email: row.email, cards: [] });
     }
@@ -1753,7 +1778,7 @@ function getDb() { return db; }
 
 module.exports = {
   // Boards
-  createBoard, getBoard, updateBoard, deleteBoard, getBoards,
+  createBoard, getBoard, updateBoard, updateBoardDigestSetting, deleteBoard, getBoards,
   // Columns
   createColumn, updateColumn, deleteColumn, moveColumn,
   getColumnBoardId, getCardBoardId,

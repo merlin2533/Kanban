@@ -705,6 +705,17 @@ app.patch('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) =
   res.json(board);
 });
 
+// Per-board weekly digest toggle (editors and admins)
+app.put('/api/boards/:boardId/digest-enabled', authMiddleware, requireBoardEdit, (req, res) => {
+  const id = req.params.boardId;
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  if (!requireBoardAccess(req, id)) return res.status(403).json({ error: 'No access to this board' });
+  const { enabled } = req.body; // true, false, or null
+  const board = db.updateBoardDigestSetting(id, enabled === null ? null : !!enabled);
+  if (!board) return res.status(404).json({ error: 'Board not found' });
+  res.json({ weekly_digest_enabled: board.weekly_digest_enabled });
+});
+
 app.delete('/api/boards/:boardId', authMiddleware, requireBoardEdit, (req, res) => {
   const id = req.params.boardId;
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
@@ -1787,7 +1798,7 @@ function runWeeklyDigest() {
 
     db.setSetting('weekly_digest_last_sent', new Date().toISOString());
 
-    const recipients = db.getWeeklyDigestData();
+    const recipients = db.getWeeklyDigestData(true);
     if (recipients.length > 0) {
       console.log(`[DIGEST] Sending weekly digest to ${recipients.length} user(s)`);
       email.notifyWeeklyDigest(recipients).catch(err => console.error('[DIGEST] Error:', err));
