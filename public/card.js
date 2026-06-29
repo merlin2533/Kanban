@@ -396,6 +396,8 @@ async function loadCard() {
     document.querySelector('.card-page-main').innerHTML = '<p style="padding:40px;color:#94a3b8;font-size:18px;">Karte nicht gefunden.</p>';
     return;
   }
+  // Mark card as seen so field-change indicator clears on next board render
+  if (card.updated_at) lsSet('seenCard_' + card.id, card.updated_at);
   renderCardPage();
   } finally {
     cardLoading = false;

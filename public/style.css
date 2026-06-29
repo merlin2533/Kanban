@@ -1112,6 +1112,30 @@ main#board {
   font-weight: 600;
 }
 
+/* Card field-change indicator */
+.card-field-changed {
+  border: 2px solid #f59e0b !important;
+  box-shadow: 0 0 6px rgba(245, 158, 11, 0.25) !important;
+}
+
+.field-changed-badge {
+  color: #d97706;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+/* Changed-cards filter: dim cards that have no changes */
+.board-filter-changed .card:not(.card-field-changed):not(.card-new-comments) {
+  opacity: 0.25;
+  pointer-events: none;
+}
+
+/* Header button: changed-cards badge */
+#changedCardsBtn.active {
+  color: #d97706;
+  background: rgba(245, 158, 11, 0.1);
+}
+
 @keyframes activity-pulse {
   0%, 100% { box-shadow: 0 0 8px rgba(245, 158, 11, 0.3); }
   50% { box-shadow: 0 0 16px rgba(245, 158, 11, 0.5); }
@@ -1804,6 +1828,8 @@ main#board {
   .card-activity-highlight { border-color: #f59e0b !important; }
   .card-new-comments { border-color: #3b82f6 !important; box-shadow: 0 0 6px rgba(59, 130, 246, 0.3) !important; }
   .comment-badge-new { color: #60a5fa; }
+  .card-field-changed { border-color: #f59e0b !important; box-shadow: 0 0 6px rgba(245, 158, 11, 0.3) !important; }
+  .field-changed-badge { color: #fbbf24; }
   .comment-edit-area { background: #334155; color: #e2e8f0; border-color: #2563eb; }
   .comment-cancel-btn { background: #334155; color: #94a3b8; border-color: #475569; }
   .load-more-btn { background: #334155; border-color: #475569; color: #94a3b8; }
