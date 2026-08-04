@@ -416,6 +416,7 @@ function renderCardPage() {
 
   // Description
   document.getElementById('cardDescription').value = card.description || '';
+  refreshDescriptionPreview();
 
   // Due date
   document.getElementById('cardDueDate').value = card.due_date || '';
@@ -1409,27 +1410,39 @@ function setupSSE() {
 }
 
 // --- Markdown preview for description ---
+// Defaults to rendered preview (so images and formatting are visible right
+// away when a card is opened) instead of the raw markdown source.
+let descPreviewMode = true;
+
+function refreshDescriptionPreview() {
+  const btn = document.getElementById('descPreviewBtn');
+  const textarea = document.getElementById('cardDescription');
+  const preview = document.getElementById('descPreview');
+  if (!btn || !textarea || !preview) return;
+  if (descPreviewMode) {
+    preview.innerHTML = renderMarkdown(textarea.value) || '<em style="color:#94a3b8">Keine Beschreibung</em>';
+    preview.classList.remove('hidden');
+    textarea.classList.add('hidden');
+    btn.textContent = 'Bearbeiten';
+    btn.classList.add('active');
+  } else {
+    preview.classList.add('hidden');
+    textarea.classList.remove('hidden');
+    btn.textContent = 'Vorschau';
+    btn.classList.remove('active');
+  }
+}
+
 function setupDescriptionPreview() {
   const btn = document.getElementById('descPreviewBtn');
   const textarea = document.getElementById('cardDescription');
   const preview = document.getElementById('descPreview');
   if (!btn || !textarea || !preview) return;
-  let previewMode = false;
 
   btn.onclick = () => {
-    previewMode = !previewMode;
-    if (previewMode) {
-      preview.innerHTML = renderMarkdown(textarea.value) || '<em style="color:#94a3b8">Keine Beschreibung</em>';
-      preview.classList.remove('hidden');
-      textarea.classList.add('hidden');
-      btn.textContent = 'Bearbeiten';
-      btn.classList.add('active');
-    } else {
-      preview.classList.add('hidden');
-      textarea.classList.remove('hidden');
-      btn.textContent = 'Vorschau';
-      btn.classList.remove('active');
-    }
+    descPreviewMode = !descPreviewMode;
+    refreshDescriptionPreview();
+    if (!descPreviewMode) textarea.focus();
   };
 }
 
@@ -1570,6 +1583,13 @@ function setupTypingIndicator() {
 
 // --- Setup event listeners ---
 function setupEvents() {
+  // Open rendered markdown images (description/comments) in the lightbox
+  document.addEventListener('click', (e) => {
+    const img = e.target.closest('.md-image');
+    if (!img) return;
+    openImageLightbox(img.src, img.alt || '');
+  });
+
   // Title save on blur
   const titleInput = document.getElementById('cardTitle');
   titleInput.onblur = async () => {
