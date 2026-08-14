@@ -140,6 +140,21 @@ describe('Kanban API', () => {
       assert.equal(res.status, 200);
     });
 
+    it('PATCH /api/cards/:id sets and clears card color', async () => {
+      const res = await authPatch(base, `/api/cards/${cardId}`, { color: '#ABCDEF' }, cookie);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.color, '#abcdef');
+
+      const cleared = await authPatch(base, `/api/cards/${cardId}`, { color: null }, cookie);
+      assert.equal(cleared.status, 200);
+      assert.equal(cleared.body.color, null);
+    });
+
+    it('PATCH /api/cards/:id rejects invalid color', async () => {
+      const res = await authPatch(base, `/api/cards/${cardId}`, { color: 'not-a-color' }, cookie);
+      assert.equal(res.status, 400);
+    });
+
     it('PUT /api/cards/:id/archive archives card', async () => {
       const c = await createCard(base, cookie, colId, 'To Archive');
       const cId = c.id || c.card?.id;

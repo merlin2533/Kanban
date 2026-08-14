@@ -435,6 +435,12 @@ function renderCardPage() {
     btn.classList.toggle('active', btn.dataset.priority === (card.priority || ''));
   });
 
+  // Card color
+  const cardColorInput = document.getElementById('cardColorInput');
+  const cardColorResetBtn = document.getElementById('cardColorResetBtn');
+  if (cardColorInput) cardColorInput.value = card.color || '#3b82f6';
+  if (cardColorResetBtn) cardColorResetBtn.disabled = !card.color;
+
   // Archived badge
   const badge = document.getElementById('archivedBadge');
   if (badge) badge.classList.toggle('hidden', !card.archived);
@@ -497,6 +503,8 @@ function renderCardPage() {
     document.getElementById('cardDescription').readOnly = true;
     document.getElementById('cardDueDate').disabled = true;
     document.querySelectorAll('.priority-btn').forEach(b => b.disabled = true);
+    if (document.getElementById('cardColorInput')) document.getElementById('cardColorInput').disabled = true;
+    if (document.getElementById('cardColorResetBtn')) document.getElementById('cardColorResetBtn').disabled = true;
     document.getElementById('addCommentBtn').style.display = 'none';
     document.getElementById('commentInput').style.display = 'none';
     document.querySelectorAll('.comment-markdown-hint').forEach(el => el.style.display = 'none');
@@ -1646,6 +1654,30 @@ function setupEvents() {
       } catch (e) { showError(e.message); }
     };
   });
+
+  // Card color
+  const cardColorInput = document.getElementById('cardColorInput');
+  const cardColorResetBtn = document.getElementById('cardColorResetBtn');
+  if (cardColorInput) {
+    cardColorInput.onchange = async () => {
+      const color = cardColorInput.value;
+      try {
+        await api(`/api/cards/${cardId}`, 'PATCH', { color });
+        card.color = color;
+        if (cardColorResetBtn) cardColorResetBtn.disabled = false;
+      } catch (e) { showError(e.message); }
+    };
+  }
+  if (cardColorResetBtn) {
+    cardColorResetBtn.onclick = async () => {
+      try {
+        await api(`/api/cards/${cardId}`, 'PATCH', { color: null });
+        card.color = null;
+        if (cardColorInput) cardColorInput.value = '#3b82f6';
+        cardColorResetBtn.disabled = true;
+      } catch (e) { showError(e.message); }
+    };
+  }
 
   // Assignee select
   document.getElementById('assignUserSelect').onchange = async () => {

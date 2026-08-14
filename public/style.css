@@ -1520,6 +1520,36 @@ main#board {
 
 .priority-btn:hover { opacity: 0.8; }
 
+/* --- Card color --- */
+.card-color-select {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.card-color-input {
+  width: 40px;
+  height: 32px;
+  padding: 0;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  cursor: pointer;
+  background: none;
+}
+
+.card-color-reset-btn {
+  padding: 6px 12px;
+  border: 2px solid #e2e8f0;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  font-size: 13px;
+  color: #64748b;
+  transition: all 0.15s;
+}
+.card-color-reset-btn:hover { opacity: 0.8; }
+.card-color-reset-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+
 /* --- Assignees --- */
 .assignee-list {
   display: flex;
@@ -1817,6 +1847,8 @@ main#board {
   .wip-badge.wip-exceeded { background: #450a0a; color: #fca5a5; }
   .add-column-input { background: #334155; color: #e2e8f0; border-color: #2563eb; }
   .priority-btn { background: #334155; border-color: #475569; }
+  .card-color-input { border-color: #475569; }
+  .card-color-reset-btn { background: #334155; border-color: #475569; color: #cbd5e1; }
   .assignee-tag { background: #334155; }
   .assignee-dot { border-color: #334155; }
   .board-switcher { background: #334155; color: #e2e8f0; border-color: #475569; }
@@ -2716,6 +2748,46 @@ body.bulk-mode-active #board {
 .card-quick-menu-item:hover { background: #f1f5f9; }
 .card-quick-menu-item.active { font-weight: 700; background: #eff6ff; color: #2563eb; }
 
+.card-quick-menu-divider {
+  height: 1px;
+  background: #e2e8f0;
+  margin: 4px 2px;
+}
+
+.card-quick-menu-color-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px;
+}
+
+.card-quick-menu-color-input {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #e2e8f0;
+  border-radius: 4px;
+  cursor: pointer;
+  background: none;
+}
+
+.card-quick-menu-color-label {
+  font-size: 12px;
+  color: #334155;
+  flex: 1;
+}
+
+.card-quick-menu-color-reset {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #94a3b8;
+  font-size: 12px;
+  padding: 2px 4px;
+  border-radius: 4px;
+}
+.card-quick-menu-color-reset:hover { background: #f1f5f9; color: #dc2626; }
+
 @media (prefers-color-scheme: dark) {
   .card-gear-btn { color: #64748b; }
   .card-gear-btn:hover { background: #475569; color: #e2e8f0; }
@@ -2723,6 +2795,10 @@ body.bulk-mode-active #board {
   .card-quick-menu-item { color: #e2e8f0; }
   .card-quick-menu-item:hover { background: #334155; }
   .card-quick-menu-item.active { background: #1e3a5f; color: #93c5fd; }
+  .card-quick-menu-divider { background: #475569; }
+  .card-quick-menu-color-input { border-color: #475569; }
+  .card-quick-menu-color-label { color: #e2e8f0; }
+  .card-quick-menu-color-reset:hover { background: #334155; color: #f87171; }
 }
 
 /* --- Spalten-Farbe Button --- */
