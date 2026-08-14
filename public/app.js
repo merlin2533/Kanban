@@ -1797,6 +1797,11 @@ function createCardEl(card) {
     div.appendChild(timeProgress);
   }
 
+  // Kartenfarbe: leicht getönter Hintergrund, damit Text lesbar bleibt
+  if (card.color) {
+    div.style.backgroundColor = card.color + '2a'; // ~16% Deckkraft
+  }
+
   // Prioritäts-Rand (überfällig überschreibt Priorität)
   if (isOverdueCard) {
     div.style.borderLeft = '4px solid #dc2626';
@@ -1838,7 +1843,69 @@ function createCardEl(card) {
         };
         menu.appendChild(btn);
       }
-      div.appendChild(menu);
+
+      // Kartenfarbe
+      const colorDivider = document.createElement('div');
+      colorDivider.className = 'card-quick-menu-divider';
+      menu.appendChild(colorDivider);
+
+      const colorRow = document.createElement('div');
+      colorRow.className = 'card-quick-menu-color-row';
+
+      const colorInput = document.createElement('input');
+      colorInput.type = 'color';
+      colorInput.className = 'card-quick-menu-color-input';
+      colorInput.value = card.color || '#3b82f6';
+      colorInput.title = 'Kartenfarbe wählen';
+      colorInput.oninput = async () => {
+        try {
+          await api(`/api/cards/${card.id}`, 'PATCH', { color: colorInput.value });
+          card.color = colorInput.value;
+          div.style.backgroundColor = colorInput.value + '2a';
+        } catch (err) { showError(err.message); }
+      };
+      colorRow.appendChild(colorInput);
+
+      const colorLabel = document.createElement('span');
+      colorLabel.className = 'card-quick-menu-color-label';
+      colorLabel.textContent = 'Farbe';
+      colorRow.appendChild(colorLabel);
+
+      if (card.color) {
+        const resetBtn = document.createElement('button');
+        resetBtn.className = 'card-quick-menu-color-reset';
+        resetBtn.textContent = '✕';
+        resetBtn.title = 'Farbe entfernen';
+        resetBtn.onclick = async (ev) => {
+          ev.stopPropagation();
+          menu.remove();
+          try {
+            await api(`/api/cards/${card.id}`, 'PATCH', { color: null });
+            card.color = null;
+            div.style.backgroundColor = '';
+          } catch (err) { showError(err.message); }
+        };
+        colorRow.appendChild(resetBtn);
+      }
+
+      menu.appendChild(colorRow);
+
+      // Menu an body anhängen und über dem Gear-Button positionieren,
+      // damit es nicht vom scrollenden Spalten-Container abgeschnitten wird
+      menu.style.position = 'fixed';
+      document.body.appendChild(menu);
+      const btnRect = gearBtn.getBoundingClientRect();
+      const menuRect = menu.getBoundingClientRect();
+      let top = btnRect.bottom + 4;
+      if (top + menuRect.height > window.innerHeight) {
+        top = Math.max(4, btnRect.top - menuRect.height - 4);
+      }
+      let left = btnRect.right - menuRect.width;
+      left = Math.min(Math.max(4, left), window.innerWidth - menuRect.width - 4);
+      menu.style.top = `${top}px`;
+      menu.style.left = `${left}px`;
+      menu.style.right = 'auto';
+
       // Außerhalb-Klick schließt Menu
       setTimeout(() => {
         const closeMenu = (ev) => {

@@ -881,6 +881,15 @@ app.patch('/api/cards/:cardId', authMiddleware, requireEdit, (req, res) => {
     const valid = [null, 'low', 'medium', 'high'];
     updates.priority = valid.includes(req.body.priority) ? req.body.priority : null;
   }
+  if (req.body.color !== undefined) {
+    if (req.body.color === null || req.body.color === '') {
+      updates.color = null;
+    } else if (typeof req.body.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(req.body.color)) {
+      updates.color = req.body.color.toLowerCase();
+    } else {
+      return res.status(400).json({ error: 'color must be a hex string like #rrggbb or null' });
+    }
+  }
   if (req.body.recurrence !== undefined) {
     const validRec = [null, 'daily', 'weekly', 'monthly'];
     updates.recurrence = validRec.includes(req.body.recurrence) ? req.body.recurrence : null;
@@ -1298,6 +1307,13 @@ app.post('/api/boards/:boardId/bulk', authMiddleware, requireEdit, (req, res) =>
       const validPri = [null, 'low', 'medium', 'high'];
       const priority = validPri.includes(req.body.priority) ? req.body.priority : null;
       for (const id of validatedIds) db.updateCard(id, { priority });
+    } else if (action === 'color') {
+      const rawColor = req.body.color;
+      const color = (rawColor === null || rawColor === '') ? null
+        : (typeof rawColor === 'string' && /^#[0-9a-fA-F]{6}$/.test(rawColor)) ? rawColor.toLowerCase()
+        : undefined;
+      if (color === undefined) return res.status(400).json({ error: 'color must be a hex string like #rrggbb or null' });
+      for (const id of validatedIds) db.updateCard(id, { color });
     } else {
       return res.status(400).json({ error: 'Unknown action' });
     }

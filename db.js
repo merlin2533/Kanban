@@ -372,6 +372,9 @@ try {
 try { db.prepare('ALTER TABLE cards ADD COLUMN time_estimate INTEGER DEFAULT NULL').run(); } catch {}
 try { db.prepare('ALTER TABLE cards ADD COLUMN time_logged INTEGER DEFAULT NULL').run(); } catch {}
 
+// Migration: add color column to cards (card background color, hex string)
+try { db.prepare('ALTER TABLE cards ADD COLUMN color TEXT DEFAULT NULL').run(); } catch {}
+
 // Card templates table (per-board)
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_templates (
@@ -893,8 +896,9 @@ function updateCard(id, updates) {
   const priority = updates.priority !== undefined ? updates.priority : card.priority;
   const recurrence = updates.recurrence !== undefined ? updates.recurrence : card.recurrence;
   const time_estimate = updates.time_estimate !== undefined ? updates.time_estimate : card.time_estimate;
+  const color = updates.color !== undefined ? updates.color : card.color;
 
-  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, recurrence = ?, time_estimate = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, recurrence, time_estimate, id);
+  db.prepare("UPDATE cards SET text = ?, description = ?, due_date = ?, priority = ?, recurrence = ?, time_estimate = ?, color = ?, updated_at = datetime('now') WHERE id = ?").run(text, description, due_date, priority, recurrence, time_estimate, color, id);
 
   const updated = db.prepare('SELECT * FROM cards WHERE id = ?').get(id);
   const col = db.prepare('SELECT * FROM columns WHERE id = ?').get(updated.column_id);
