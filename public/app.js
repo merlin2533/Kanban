@@ -2276,10 +2276,14 @@ async function openCardModal(card) {
     assignSelect.innerHTML = '<option value="">+ Benutzer zuweisen...</option>';
     try {
       if (currentUser && currentUser.is_admin) {
-        const users = await api('/api/admin/users');
+        const [users, boardMembers] = await Promise.all([
+          api('/api/admin/users'),
+          api(`/api/boards/${boardId}/members`)
+        ]);
+        const memberIds = new Set(boardMembers.map(m => m.id));
         const assigned = new Set((card.assignees || []).map(a => a.id));
         for (const u of users) {
-          if (!assigned.has(u.id)) {
+          if (!assigned.has(u.id) && (u.is_admin || memberIds.has(u.id))) {
             const opt = document.createElement('option');
             opt.value = u.id;
             opt.textContent = u.username;
