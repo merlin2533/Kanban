@@ -470,11 +470,15 @@ function renderCardPage() {
   // Assignee select (admin only)
   const assignSelect = document.getElementById('assignUserSelect');
   if (assignSelect && currentUser && currentUser.is_admin) {
-    api('/api/admin/users').then(users => {
+    Promise.all([
+      api('/api/admin/users'),
+      api(`/api/boards/${boardId}/members`)
+    ]).then(([users, boardMembers]) => {
+      const memberIds = new Set(boardMembers.map(m => m.id));
       const assigned = new Set((card.assignees || []).map(a => a.id));
       assignSelect.innerHTML = '<option value="">+ Benutzer zuweisen...</option>';
       for (const u of users) {
-        if (!assigned.has(u.id)) {
+        if (!assigned.has(u.id) && (u.is_admin || memberIds.has(u.id))) {
           const opt = document.createElement('option');
           opt.value = u.id;
           opt.textContent = u.username;

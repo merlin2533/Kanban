@@ -1424,11 +1424,18 @@ app.post('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, (r
   const cardId = validId(req.params.cardId);
   const userId = validId(req.params.userId);
   if (!cardId || !userId) return res.status(400).json({ error: 'Invalid ID' });
+  const boardId = db.getCardBoardId(cardId);
+  if (!boardId) return res.status(404).json({ error: 'Card not found' });
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
+  const targetUser = db.getUserById(userId);
+  if (!targetUser) return res.status(404).json({ error: 'User not found' });
+  if (!targetUser.is_admin && !db.isBoardMember(boardId, userId)) {
+    return res.status(403).json({ error: 'User has no access to this board' });
+  }
   db.assignCard(cardId, userId);
   // Auto-watch card when assigned
   db.watchCard(cardId, userId);
-  const boardId = db.getCardBoardId(cardId);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_assigned' });
+  broadcast(boardId, { type: 'update', action: 'card_assigned' });
   // Email notification
   const card = db.getDb().prepare('SELECT id, text FROM cards WHERE id = ?').get(cardId);
   if (card) {
@@ -1446,9 +1453,11 @@ app.delete('/api/cards/:cardId/assignees/:userId', authMiddleware, requireEdit, 
   const cardId = validId(req.params.cardId);
   const userId = validId(req.params.userId);
   if (!cardId || !userId) return res.status(400).json({ error: 'Invalid ID' });
-  db.unassignCard(cardId, userId);
   const boardId = db.getCardBoardId(cardId);
-  if (boardId) broadcast(boardId, { type: 'update', action: 'card_unassigned' });
+  if (!boardId) return res.status(404).json({ error: 'Card not found' });
+  if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access to this board' });
+  db.unassignCard(cardId, userId);
+  broadcast(boardId, { type: 'update', action: 'card_unassigned' });
   res.json({ ok: true });
 });
 
