@@ -37,8 +37,15 @@ services:
     environment:
       - DATABASE_URL=${DATABASE_URL:-postgresql://postgres:postgres@resqioticket_DB:5432/resqioticket}
       - BASE_URL=${BASE_URL:-http://localhost:3200}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-resend}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-0}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
       - API_KEY=${API_KEY:-}
       - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
       - REMINDER_INTERVAL_HOURS=${REMINDER_INTERVAL_HOURS:-24}
@@ -82,8 +89,15 @@ services:
       - BASE_URL=${APP_URL:-http://localhost:3200}
       - ADMIN_USER=${ADMIN_USER:-admin}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-admin}
+      - EMAIL_PROVIDER=${EMAIL_PROVIDER:-resend}
       - RESEND_API_KEY=${RESEND_API_KEY:-}
       - EMAIL_FROM=${EMAIL_FROM:-support@yourdomain.com}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-0}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-}
       - API_KEY=${API_KEY:-default-dev-api-key}
       - INBOUND_WEBHOOK_SECRET=${INBOUND_WEBHOOK_SECRET:-}
       - CRON_SECRET=${CRON_SECRET:-default-cron-secret}

@@ -1,24 +1,43 @@
 'use strict';
 
+const nodemailer = require('nodemailer');
 const db = require('./db');
 
 // ---------------------------------------------------------------------------
-// sendEmail – sends a transactional email via the Resend API.
-// If RESEND_API_KEY is absent (or not configured in app_settings), the mail is
-// only logged to the console so the app stays usable without email configured.
+// sendEmail – sends a transactional email via the configured provider
+// (Resend API or a self-hosted/relay SMTP server). Provider is chosen via the
+// 'email_provider' app setting ('resend' | 'smtp', default 'resend'). If the
+// chosen provider isn't configured, the mail is only logged to the console so
+// the app stays usable without email configured.
+// attachments (optional): [{ filename, content: Buffer, contentType }]
 // ---------------------------------------------------------------------------
-async function sendEmail({ to, subject, html, text }) {
+async function sendEmail({ to, subject, html, text, attachments }) {
+  const provider = db.getSetting('email_provider') || 'resend';
+  if (provider === 'smtp') {
+    return sendViaSmtp({ to, subject, html, text, attachments });
+  }
+  return sendViaResend({ to, subject, html, text, attachments });
+}
+
+async function sendViaResend({ to, subject, html, text, attachments }) {
   const apiKey = db.getSetting('resend_api_key') || process.env.RESEND_API_KEY || '';
   const from   = db.getSetting('email_from')     || process.env.EMAIL_FROM    || 'Kanban <noreply@yourdomain.com>';
 
   if (!apiKey) {
-    console.log('[EMAIL] (no API key – mail not sent)');
+    console.log('[EMAIL] (no Resend API key – mail not sent)');
     console.log(`[EMAIL] To: ${to} | Subject: ${subject}`);
     if (text) console.log(`[EMAIL] Body: ${text}`);
     return { ok: false, reason: 'no_api_key' };
   }
 
-  const payload = JSON.stringify({ from, to, subject, html: html || text, text: text || '' });
+  const payload = { from, to, subject, html: html || text, text: text || '' };
+  if (attachments && attachments.length > 0) {
+    // Resend expects base64-encoded content
+    payload.attachments = attachments.map(a => ({
+      filename: a.filename,
+      content:  Buffer.isBuffer(a.content) ? a.content.toString('base64') : a.content,
+    }));
+  }
 
   try {
     const res = await fetch('https://api.resend.com/emails', {
@@ -27,7 +46,7 @@ async function sendEmail({ to, subject, html, text }) {
         'Authorization': `Bearer ${apiKey}`,
         'Content-Type':  'application/json',
       },
-      body: payload,
+      body: JSON.stringify(payload),
     });
 
     const body = await res.json().catch(() => ({}));
@@ -39,6 +58,45 @@ async function sendEmail({ to, subject, html, text }) {
     return { ok: true, id: body.id };
   } catch (err) {
     console.error('[EMAIL] Failed to call Resend API:', err.message);
+    return { ok: false, error: err.message };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// sendViaSmtp – sends via an arbitrary SMTP server (self-hosted mail relay,
+// provider SMTP endpoint, etc.) using nodemailer. Configured under
+// Admin → Einstellungen → E-Mail (smtp_host, smtp_port, smtp_secure,
+// smtp_user, smtp_pass, smtp_from).
+// ---------------------------------------------------------------------------
+async function sendViaSmtp({ to, subject, html, text, attachments }) {
+  const host = db.getSetting('smtp_host') || '';
+  const port = parseInt(db.getSetting('smtp_port') || '587', 10);
+  const secure = db.getSetting('smtp_secure') === '1';
+  const user = db.getSetting('smtp_user') || '';
+  const pass = db.getSetting('smtp_pass') || '';
+  const from = db.getSetting('smtp_from') || db.getSetting('email_from') || process.env.EMAIL_FROM || 'Kanban <noreply@yourdomain.com>';
+
+  if (!host) {
+    console.log('[EMAIL] (no SMTP server configured – mail not sent)');
+    console.log(`[EMAIL] To: ${to} | Subject: ${subject}`);
+    if (text) console.log(`[EMAIL] Body: ${text}`);
+    return { ok: false, reason: 'no_smtp_host' };
+  }
+
+  const transporter = nodemailer.createTransport({
+    host, port, secure,
+    auth: user ? { user, pass } : undefined,
+  });
+
+  try {
+    const info = await transporter.sendMail({
+      from, to, subject, html: html || text, text: text || '',
+      attachments: attachments || [],
+    });
+    console.log('[EMAIL] Sent via SMTP to', to, '| subject:', subject, '| id:', info.messageId);
+    return { ok: true, id: info.messageId };
+  } catch (err) {
+    console.error('[EMAIL] Failed to send via SMTP:', err.message);
     return { ok: false, error: err.message };
   }
 }
@@ -391,15 +449,25 @@ function buildWeeklyDigestText({ recipient, overdue, dueThisWeek, withNewComment
 
 // ---------------------------------------------------------------------------
 // notifyCardCreated
-//   Called when a new card is created.
-//   card         – { id, text }
+//   Called (after a short delay, see server.js) once a new card has settled.
+//   The card is usually created with just a title and then, on the detail
+//   page, immediately fleshed out with a description, a first comment and/or
+//   attached images – so we re-read the card right before sending and include
+//   whatever has been added in the meantime, instead of just the raw title.
+//   cardId       – card ID
 //   boardId      – board ID
 //   boardTitle   – title of the board
 //   columnTitle  – title of the column
 //   byUsername   – who created the card
 //   memberIds    – array of board member user IDs to notify
 // ---------------------------------------------------------------------------
-async function notifyCardCreated({ card, boardId, boardTitle, columnTitle, byUsername, memberIds }) {
+async function notifyCardCreated({ cardId, boardId, boardTitle, columnTitle, byUsername, memberIds }) {
+  const cardCtx = db.getCardEmailContext(cardId);
+  if (!cardCtx) return; // card was deleted again before the notification went out
+
+  const comments = db.getRecentComments(cardId, 5);
+  const images = db.getCardImageAttachments(cardId, 3);
+
   for (const userId of memberIds) {
     if (!isEnabled(userId, 'card_created')) continue;
     const user = db.getUserById(userId);
@@ -407,17 +475,93 @@ async function notifyCardCreated({ card, boardId, boardTitle, columnTitle, byUse
 
     await sendEmail({
       to:      user.email,
-      subject: safeSubject(`Neue Karte angelegt: "${card.text}"`),
-      text:    `Hallo ${user.username},\n\n${byUsername || 'Jemand'} hat eine neue Karte angelegt:\n\nKarte:  ${card.text}\nBoard:  ${boardTitle || boardId}\nSpalte: ${columnTitle || ''}\n`,
-      html:    `<p>Hallo <strong>${escHtml(user.username)}</strong>,</p>
-                <p><strong>${escHtml(byUsername || 'Jemand')}</strong> hat eine neue Karte angelegt:</p>
-                <table style="border-collapse:collapse;font-size:13px;margin-bottom:16px;">
-                  <tr><td style="color:#64748b;padding:3px 12px 3px 0;">Karte</td><td><strong>${escHtml(card.text)}</strong></td></tr>
-                  ${boardTitle ? `<tr><td style="color:#64748b;padding:3px 12px 3px 0;">Board</td><td>${escHtml(boardTitle)}</td></tr>` : ''}
-                  ${columnTitle ? `<tr><td style="color:#64748b;padding:3px 12px 3px 0;">Spalte</td><td>${escHtml(columnTitle)}</td></tr>` : ''}
-                </table>`,
+      subject: safeSubject(`Neue Karte angelegt: "${cardCtx.text}"`),
+      text:    buildCardCreatedEmailText({ toUsername: user.username, cardCtx, boardTitle, columnTitle, byUsername, comments, images }),
+      html:    buildCardCreatedEmailHtml({ toUsername: user.username, cardCtx, boardTitle, columnTitle, byUsername, comments, images }),
+      attachments: images.map(img => ({ filename: img.filename, content: img.file_data, contentType: img.mimetype })),
     });
   }
+}
+
+function buildCardCreatedEmailHtml({ toUsername, cardCtx, boardTitle, columnTitle, byUsername, comments, images }) {
+  const descriptionBlock = (cardCtx.description && cardCtx.description.trim())
+    ? `<div style="background:#f8fafc;border-left:3px solid #cbd5e1;padding:8px 12px;margin-bottom:16px;font-size:13px;color:#475569;">${escHtml(cardCtx.description).replace(/\n/g, '<br>')}</div>`
+    : '';
+
+  let commentsBlock = '';
+  if (comments && comments.length > 0) {
+    const items = comments.map(c =>
+      `<div style="padding:8px 0;border-bottom:1px solid #f1f5f9;">
+        <span style="font-weight:600;font-size:12px;color:#475569;">${escHtml(c.author || 'Unbekannt')}</span>
+        <div style="margin-top:4px;font-size:13px;color:#374151;">${escHtml(c.text).replace(/\n/g, '<br>')}</div>
+      </div>`
+    ).join('');
+    commentsBlock = `
+      <div style="margin-top:16px;">
+        <h3 style="font-size:13px;color:#64748b;margin:0 0 8px 0;text-transform:uppercase;letter-spacing:.05em;">Kommentare</h3>
+        <div style="font-size:13px;">${items}</div>
+      </div>`;
+  }
+
+  const imagesNote = (images && images.length > 0)
+    ? `<p style="font-size:12px;color:#94a3b8;margin-top:16px;">📎 ${images.length} Bild${images.length > 1 ? 'er' : ''} im Anhang dieser E-Mail.</p>`
+    : '';
+
+  return `<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"></head>
+<body style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f1f5f9;margin:0;padding:24px;">
+  <div style="max-width:600px;margin:0 auto;background:#fff;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.1);">
+    <div style="background:#2563eb;padding:20px 24px;">
+      <span style="color:#fff;font-size:18px;font-weight:700;">📋 Kanban</span>
+    </div>
+    <div style="padding:24px;">
+      <p style="margin:0 0 4px 0;color:#64748b;font-size:13px;">Hallo <strong>${escHtml(toUsername)}</strong>,</p>
+      <p style="margin:0 0 20px 0;font-size:14px;color:#374151;">
+        <strong>${escHtml(byUsername || 'Jemand')}</strong> hat eine neue Karte angelegt:
+      </p>
+      <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:12px 16px;margin-bottom:16px;">
+        <span style="font-size:15px;font-weight:600;color:#1e40af;">${escHtml(cardCtx.text)}</span>
+      </div>
+      <table style="border-collapse:collapse;font-size:13px;margin-bottom:16px;">
+        ${boardTitle ? `<tr><td style="color:#64748b;padding:3px 12px 3px 0;">Board</td><td>${escHtml(boardTitle)}</td></tr>` : ''}
+        ${columnTitle ? `<tr><td style="color:#64748b;padding:3px 12px 3px 0;">Spalte</td><td>${escHtml(columnTitle)}</td></tr>` : ''}
+      </table>
+      ${descriptionBlock}
+      ${commentsBlock}
+      ${imagesNote}
+    </div>
+    <div style="background:#f8fafc;padding:12px 24px;border-top:1px solid #e2e8f0;font-size:11px;color:#94a3b8;">
+      Diese Nachricht wurde automatisch von Ihrem Kanban-System versandt.
+    </div>
+  </div>
+</body>
+</html>`;
+}
+
+function buildCardCreatedEmailText({ toUsername, cardCtx, boardTitle, columnTitle, byUsername, comments, images }) {
+  const lines = [
+    `Hallo ${toUsername},`,
+    '',
+    `${byUsername || 'Jemand'} hat eine neue Karte angelegt:`,
+    '',
+    `Karte:  ${cardCtx.text}`,
+  ];
+  if (boardTitle) lines.push(`Board:  ${boardTitle}`);
+  if (columnTitle) lines.push(`Spalte: ${columnTitle}`);
+  if (cardCtx.description && cardCtx.description.trim()) {
+    lines.push('', 'Beschreibung:', cardCtx.description.trim());
+  }
+  if (comments && comments.length > 0) {
+    lines.push('', '--- Kommentare ---');
+    for (const c of comments) {
+      lines.push(`${c.author || 'Unbekannt'}:`, c.text, '');
+    }
+  }
+  if (images && images.length > 0) {
+    lines.push(`📎 ${images.length} Bild${images.length > 1 ? 'er' : ''} im Anhang dieser E-Mail.`);
+  }
+  return lines.join('\n');
 }
 
 // ---------------------------------------------------------------------------
