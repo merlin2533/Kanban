@@ -1726,6 +1726,15 @@ function getRecentComments(cardId, limit = 5) {
   return rows.reverse(); // oldest first so email context reads top-to-bottom
 }
 
+// Image attachments with their binary data, for embedding into notification emails.
+function getCardImageAttachments(cardId, limit = 3) {
+  return db.prepare(
+    `SELECT filename, mimetype, file_data FROM attachments
+     WHERE card_id = ? AND mimetype LIKE 'image/%' AND file_data IS NOT NULL
+     ORDER BY position ASC, created_at DESC LIMIT ?`
+  ).all(cardId, limit);
+}
+
 function setNotificationPref(userId, eventType, emailEnabled) {
   if (!NOTIFICATION_EVENT_TYPES.includes(eventType)) throw new Error('Invalid event type');
   db.prepare('INSERT OR REPLACE INTO notification_prefs (user_id, event_type, email_enabled) VALUES (?, ?, ?)')
@@ -1830,7 +1839,7 @@ module.exports = {
   getCardDependencies, addCardDependency, removeCardDependency, getBlockedCardIds,
   // Notification Preferences
   getNotificationPrefs, setNotificationPref, initUserNotificationPrefs, NOTIFICATION_EVENT_TYPES,
-  getCardEmailContext, getRecentComments,
+  getCardEmailContext, getRecentComments, getCardImageAttachments,
   // Due-date reminders & weekly digest
   getCardsDueSoon, getWeeklyDigestData,
   // Audit Log

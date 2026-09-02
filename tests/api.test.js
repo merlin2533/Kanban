@@ -325,6 +325,49 @@ describe('Kanban API', () => {
     });
   });
 
+  // ── Admin Settings (Email / SMTP) ───────────────────────────────
+
+  describe('Admin Settings', () => {
+    it('GET /api/admin/settings defaults to resend provider with empty SMTP config', async () => {
+      const res = await authGet(base, '/api/admin/settings', cookie);
+      assert.equal(res.status, 200);
+      assert.equal(res.body.email_provider, 'resend');
+      assert.equal(res.body.smtp_host, '');
+      assert.equal(res.body.smtp_port, '587');
+    });
+
+    it('PUT /api/admin/settings stores SMTP config and switches provider', async () => {
+      const res = await authPut(base, '/api/admin/settings', {
+        email_provider: 'smtp',
+        smtp_host: 'smtp.example.com',
+        smtp_port: '2525',
+        smtp_secure: '1',
+        smtp_user: 'kanban@example.com',
+        smtp_pass: 'secret',
+        smtp_from: 'Kanban <kanban@example.com>',
+      }, cookie);
+      assert.equal(res.status, 200);
+
+      const get = await authGet(base, '/api/admin/settings', cookie);
+      assert.equal(get.body.email_provider, 'smtp');
+      assert.equal(get.body.smtp_host, 'smtp.example.com');
+      assert.equal(get.body.smtp_port, '2525');
+      assert.equal(get.body.smtp_secure, '1');
+      assert.equal(get.body.smtp_from, 'Kanban <kanban@example.com>');
+    });
+
+    it('POST /api/admin/settings/test-email rejects an invalid address', async () => {
+      const res = await authPost(base, '/api/admin/settings/test-email', { to: 'not-an-email' }, cookie);
+      assert.equal(res.status, 400);
+    });
+
+    it('POST /api/admin/settings/test-email reports a send failure when unconfigured', async () => {
+      await authPut(base, '/api/admin/settings', { email_provider: 'resend', resend_api_key: '' }, cookie);
+      const res = await authPost(base, '/api/admin/settings/test-email', { to: 'someone@example.com' }, cookie);
+      assert.equal(res.status, 502);
+    });
+  });
+
   // ── Notification Prefs ────────────────────────────────────────
 
   describe('Notification Preferences', () => {

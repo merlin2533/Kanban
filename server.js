@@ -11,9 +11,21 @@ const email = require('./email');
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
 
+// How long to wait after a card is created before sending the "card created"
+// email, so it can pick up the description/first comment/images that are
+// typically added right after, on the card detail page.
+const CARD_CREATED_EMAIL_DELAY_MS = parseInt(process.env.CARD_CREATED_EMAIL_DELAY_MS, 10) || 2 * 60 * 1000;
+
 // --- Initialise persisted app settings from env vars (first-run defaults) ---
 db.initSetting('resend_api_key',           process.env.RESEND_API_KEY           || '');
 db.initSetting('email_from',               process.env.EMAIL_FROM               || 'support@yourdomain.com');
+db.initSetting('email_provider',           process.env.EMAIL_PROVIDER           || 'resend'); // 'resend' | 'smtp'
+db.initSetting('smtp_host',                process.env.SMTP_HOST                || '');
+db.initSetting('smtp_port',                process.env.SMTP_PORT                || '587');
+db.initSetting('smtp_secure',              process.env.SMTP_SECURE              || '0'); // '1' = TLS/SSL (usually port 465)
+db.initSetting('smtp_user',                process.env.SMTP_USER                || '');
+db.initSetting('smtp_pass',                process.env.SMTP_PASS                || '');
+db.initSetting('smtp_from',                process.env.SMTP_FROM                || '');
 db.initSetting('reminder_interval_hours',  process.env.REMINDER_INTERVAL_HOURS  || '24');
 db.initSetting('reminder_escalation_days', process.env.REMINDER_ESCALATION_DAYS || '3');
 db.initSetting('weekly_digest_enabled',    process.env.WEEKLY_DIGEST_ENABLED    || '1');
@@ -836,21 +848,28 @@ app.post('/api/columns/:columnId/cards', authMiddleware, requireEdit, mutationRa
   if (!card) return res.status(404).json({ error: 'Column not found' });
   const boardId = db.getColumnBoardId(columnId);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_created', user: createdBy });
-  // Email notification for card_created
+  // Email notification for card_created. Cards are created with just a title
+  // and then, on the detail page, immediately fleshed out with a description,
+  // a first comment and/or attached images — so the notification is delayed a
+  // little to pick that up (see email.notifyCardCreated, which re-reads the
+  // card right before sending) instead of only ever showing the raw title.
   if (boardId) {
     const members = db.getBoardMembers(boardId);
     if (members && members.length > 0) {
       const boardRow = db.getDb().prepare('SELECT title FROM boards WHERE id = ?').get(boardId);
       const colRow   = db.getDb().prepare('SELECT title FROM columns WHERE id = ?').get(columnId);
       const actorId  = req.user ? req.user.id : null;
-      email.notifyCardCreated({
-        card,
-        boardId,
-        boardTitle:  boardRow ? boardRow.title : null,
-        columnTitle: colRow   ? colRow.title   : null,
-        byUsername:  createdBy,
-        memberIds:   members.map(m => m.id).filter(mid => mid !== actorId),
-      }).catch(err => console.error('[EMAIL] notifyCardCreated error:', err));
+      const memberIds = members.map(m => m.id).filter(mid => mid !== actorId);
+      setTimeout(() => {
+        email.notifyCardCreated({
+          cardId: card.id,
+          boardId,
+          boardTitle:  boardRow ? boardRow.title : null,
+          columnTitle: colRow   ? colRow.title   : null,
+          byUsername:  createdBy,
+          memberIds,
+        }).catch(err => console.error('[EMAIL] notifyCardCreated error:', err));
+      }, CARD_CREATED_EMAIL_DELAY_MS).unref();
     }
   }
   res.status(201).json(card);
@@ -1629,8 +1648,15 @@ app.get('/api/boards/:boardId/activity', authMiddleware, (req, res) => {
 app.get('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
   const s = db.getAllSettings();
   res.json({
+    email_provider:           s.email_provider           || 'resend',
     resend_api_key:           s.resend_api_key           || '',
     email_from:               s.email_from               || '',
+    smtp_host:                s.smtp_host                || '',
+    smtp_port:                s.smtp_port                || '587',
+    smtp_secure:              s.smtp_secure              || '0',
+    smtp_user:                s.smtp_user                || '',
+    smtp_pass:                s.smtp_pass                || '',
+    smtp_from:                s.smtp_from                || '',
     reminder_interval_hours:  s.reminder_interval_hours  || '24',
     reminder_escalation_days: s.reminder_escalation_days || '3',
     weekly_digest_enabled:    s.weekly_digest_enabled    || '1',
@@ -1642,14 +1668,17 @@ app.get('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
 
 // PUT /api/admin/settings  → update one or more settings
 app.put('/api/admin/settings', authMiddleware, requireAdmin, (req, res) => {
-  const allowed = ['resend_api_key', 'email_from', 'reminder_interval_hours', 'reminder_escalation_days',
+  const allowed = ['email_provider', 'resend_api_key', 'email_from',
+                   'smtp_host', 'smtp_port', 'smtp_secure', 'smtp_user', 'smtp_pass', 'smtp_from',
+                   'reminder_interval_hours', 'reminder_escalation_days',
                    'weekly_digest_enabled', 'weekly_digest_day', 'weekly_digest_hour'];
+  const maskedKeys = new Set(['resend_api_key', 'smtp_pass']);
   const changed = [];
   for (const key of allowed) {
     if (req.body[key] !== undefined) {
       db.setSetting(key, req.body[key]);
       // Don't log sensitive values; log which keys were changed
-      changed.push(key === 'resend_api_key' ? 'resend_api_key (masked)' : key);
+      changed.push(maskedKeys.has(key) ? `${key} (masked)` : key);
     }
   }
   if (changed.length > 0) {
@@ -1666,6 +1695,23 @@ app.post('/api/admin/settings/rotate-api-key', authMiddleware, requireAdmin, (re
   const ip = req.ip || req.connection.remoteAddress;
   db.logAudit(req.user.id, 'settings_changed', 'settings', null, { changed_keys: ['api_key (rotated)'] }, ip);
   res.json({ api_key: newKey });
+});
+
+// POST /api/admin/settings/test-email  → send a test email to verify Resend/SMTP config
+app.post('/api/admin/settings/test-email', authMiddleware, requireAdmin, mutationRateLimit(20), async (req, res) => {
+  const to = validString(req.body.to, 200);
+  if (!to || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(to)) {
+    return res.status(400).json({ error: 'Valid recipient email address required' });
+  }
+  const provider = db.getSetting('email_provider') || 'resend';
+  const result = await email.sendEmail({
+    to,
+    subject: 'Kanban – Test-E-Mail',
+    text: `Diese Test-E-Mail wurde über den Provider "${provider}" verschickt. Wenn du sie erhalten hast, ist die Konfiguration korrekt.`,
+    html: `<p>Diese Test-E-Mail wurde über den Provider <strong>${provider}</strong> verschickt.</p><p>Wenn du sie erhalten hast, ist die Konfiguration korrekt.</p>`,
+  });
+  if (!result.ok) return res.status(502).json({ error: 'Versand fehlgeschlagen', detail: result.reason || result.error || result.body });
+  res.json({ ok: true });
 });
 
 // --- External API (authenticated by api_key) ---
