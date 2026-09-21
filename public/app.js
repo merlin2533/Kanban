@@ -368,8 +368,27 @@ document.addEventListener('DOMContentLoaded', async () => {
 
   // Board title inline edit
   const boardTitleEl = document.getElementById('boardTitle');
-  boardTitleEl.contentEditable = true;
-  boardTitleEl.style.cursor = 'text';
+  if (canEditBoard()) {
+    boardTitleEl.contentEditable = true;
+    boardTitleEl.style.cursor = 'text';
+
+    const boardTitleEditBtn = document.createElement('button');
+    boardTitleEditBtn.id = 'boardTitleEditBtn';
+    boardTitleEditBtn.className = 'icon-btn board-title-edit-btn';
+    boardTitleEditBtn.type = 'button';
+    boardTitleEditBtn.innerHTML = '&#9999;'; // pencil icon
+    boardTitleEditBtn.title = 'Boardname bearbeiten';
+    boardTitleEditBtn.setAttribute('aria-label', 'Boardname bearbeiten');
+    boardTitleEditBtn.onclick = () => {
+      boardTitleEl.focus();
+      const range = document.createRange();
+      range.selectNodeContents(boardTitleEl);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+    };
+    boardTitleEl.insertAdjacentElement('afterend', boardTitleEditBtn);
+  }
   boardTitleEl.addEventListener('blur', async () => {
     const newTitle = boardTitleEl.textContent.trim();
     if (newTitle && newTitle !== board.title) {
@@ -1500,11 +1519,16 @@ function createColumnEl(col) {
   // Add card input
   const addCard = document.createElement('div');
   addCard.className = 'add-card';
+  // Wrapped in a <form> so mobile virtual keyboards (whose "Go"/"Done" action
+  // button doesn't always dispatch a real Enter keydown) still submit reliably.
+  const addForm = document.createElement('form');
+  addForm.className = 'add-card-form';
   const addInput = document.createElement('input');
+  addInput.type = 'text';
   addInput.placeholder = '+ Karte hinzufügen...';
+  addInput.enterKeyHint = 'done';
   let addingCard = false;
-  addInput.onkeydown = async (e) => {
-    if (e.key !== 'Enter') return;
+  addForm.onsubmit = async (e) => {
     e.preventDefault();
     const text = addInput.value.trim();
     if (!text || addingCard) return;
@@ -1521,7 +1545,8 @@ function createColumnEl(col) {
       addingCard = false;
     }
   };
-  addCard.appendChild(addInput);
+  addForm.appendChild(addInput);
+  addCard.appendChild(addForm);
 
   // Card template dropdown
   const templateSelect = document.createElement('select');
@@ -3270,6 +3295,8 @@ async function setupBoardSwitcher() {
 
     // Hide h1 when switcher is present — they both show the board name
     boardTitle.style.display = 'none';
+    const boardTitleEditBtn = document.getElementById('boardTitleEditBtn');
+    if (boardTitleEditBtn) boardTitleEditBtn.style.display = 'none';
   } catch (e) { console.warn('[BoardSwitcher] Boards konnten nicht geladen werden:', e.message); }
 }
 
