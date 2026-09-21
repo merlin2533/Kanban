@@ -86,6 +86,16 @@ header h1 {
 
 .icon-btn:hover { background: #f1f5f9; }
 
+.board-title-edit-btn {
+  border: none;
+  padding: 2px 4px;
+  font-size: 13px;
+  color: var(--color-text-muted);
+  opacity: 0.7;
+}
+
+.board-title-edit-btn:hover { opacity: 1; background: #f1f5f9; }
+
 button:focus-visible { outline: 2px solid #2563eb; outline-offset: 2px; }
 
 .badge {
@@ -314,6 +324,10 @@ main#board {
 /* --- Add card / column --- */
 .add-card {
   padding: 8px;
+}
+
+.add-card-form {
+  margin: 0;
 }
 
 .add-card input {
