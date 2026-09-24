@@ -102,6 +102,7 @@ db.exec(`
     password_salt TEXT NOT NULL,
     password_changed_at TEXT DEFAULT (datetime('now')),
     is_admin INTEGER DEFAULT 0,
+    password_never_expires INTEGER DEFAULT 0,
     created_at TEXT DEFAULT (datetime('now'))
   );
 
@@ -375,6 +376,9 @@ try { db.prepare('ALTER TABLE cards ADD COLUMN time_logged INTEGER DEFAULT NULL'
 // Migration: add color column to cards (card background color, hex string)
 try { db.prepare('ALTER TABLE cards ADD COLUMN color TEXT DEFAULT NULL').run(); } catch {}
 
+// Migration: add password_never_expires column to users (per-user: skip the password-age reminder)
+try { db.prepare('ALTER TABLE users ADD COLUMN password_never_expires INTEGER DEFAULT 0').run(); } catch {}
+
 // Card templates table (per-board)
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_templates (
@@ -423,7 +427,7 @@ function authenticateUser(username, password) {
   const user = db.prepare('SELECT * FROM users WHERE username = ?').get(username);
   if (!user) return null;
   if (!verifyPassword(password, user.password_hash, user.password_salt)) return null;
-  return { id: user.id, username: user.username, is_admin: user.is_admin, password_changed_at: user.password_changed_at };
+  return { id: user.id, username: user.username, is_admin: user.is_admin, password_changed_at: user.password_changed_at, password_never_expires: user.password_never_expires };
 }
 
 function changePassword(userId, newPassword) {
@@ -447,7 +451,7 @@ function createSession(userId) {
 }
 
 function getSession(sessionId) {
-  const session = db.prepare("SELECT s.*, u.username, u.is_admin, u.password_changed_at FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime('now')").get(sessionId);
+  const session = db.prepare("SELECT s.*, u.username, u.is_admin, u.password_changed_at, u.password_never_expires FROM sessions s JOIN users u ON s.user_id = u.id WHERE s.id = ? AND s.expires_at > datetime('now')").get(sessionId);
   return session || null;
 }
 
@@ -552,18 +556,18 @@ function removeBoardMember(boardId, userId) {
 }
 
 function getUsers() {
-  return db.prepare('SELECT id, username, is_admin, email, password_changed_at, created_at FROM users').all();
+  return db.prepare('SELECT id, username, is_admin, email, password_changed_at, password_never_expires, created_at FROM users').all();
 }
 
 function getUserById(id) {
-  return db.prepare('SELECT id, username, is_admin, email, created_at FROM users WHERE id = ?').get(id) || null;
+  return db.prepare('SELECT id, username, is_admin, email, password_never_expires, created_at FROM users WHERE id = ?').get(id) || null;
 }
 
 function setUserEmail(userId, email) {
   db.prepare('UPDATE users SET email = ? WHERE id = ?').run(email || null, userId);
 }
 
-function updateUser(userId, { username, email, password, isAdmin }) {
+function updateUser(userId, { username, email, password, isAdmin, passwordNeverExpires }) {
   const existing = db.prepare('SELECT id FROM users WHERE id = ?').get(userId);
   if (!existing) return null;
   if (username !== undefined) {
@@ -581,7 +585,10 @@ function updateUser(userId, { username, email, password, isAdmin }) {
   if (isAdmin !== undefined) {
     db.prepare('UPDATE users SET is_admin = ? WHERE id = ?').run(isAdmin ? 1 : 0, userId);
   }
-  return db.prepare('SELECT id, username, is_admin, email, created_at FROM users WHERE id = ?').get(userId);
+  if (passwordNeverExpires !== undefined) {
+    db.prepare('UPDATE users SET password_never_expires = ? WHERE id = ?').run(passwordNeverExpires ? 1 : 0, userId);
+  }
+  return db.prepare('SELECT id, username, is_admin, email, password_never_expires, created_at FROM users WHERE id = ?').get(userId);
 }
 
 function deleteUser(id) {

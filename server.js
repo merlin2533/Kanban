@@ -263,7 +263,7 @@ app.post('/api/auth/login', loginRateLimit, (req, res) => {
   db.logAudit(user.id, 'login_success', 'user', user.id, { username: user.username }, ip);
   res.setHeader('Set-Cookie', cookieStr);
   const pwAge = user.password_changed_at ? (Date.now() - new Date(user.password_changed_at + 'Z').getTime()) / 86400000 : 999;
-  res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 });
+  res.json({ user: { id: user.id, username: user.username, is_admin: user.is_admin }, passwordReminder: pwAge >= 14 && !user.password_never_expires });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -289,7 +289,7 @@ app.get('/api/auth/me', (req, res) => {
   }
   authLog('me: → OK, user:', session.username);
   const pwAge = session.password_changed_at ? (Date.now() - new Date(session.password_changed_at + 'Z').getTime()) / 86400000 : 999;
-  res.json({ user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
+  res.json({ user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 && !session.password_never_expires });
 });
 
 // Returns 200 always – used by login page to avoid a red 401 in the console
@@ -308,7 +308,7 @@ app.get('/api/auth/status', (req, res) => {
   }
   authLog('status: → authenticated: true, user:', session.username);
   const pwAge = session.password_changed_at ? (Date.now() - new Date(session.password_changed_at + 'Z').getTime()) / 86400000 : 999;
-  res.json({ authenticated: true, user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 });
+  res.json({ authenticated: true, user: { id: session.user_id, username: session.username, is_admin: session.is_admin }, passwordReminder: pwAge >= 14 && !session.password_never_expires });
 });
 
 app.post('/api/auth/change-password', authMiddleware, (req, res) => {
@@ -1781,7 +1781,7 @@ app.get('/api/me/profile', authMiddleware, (req, res) => {
 app.patch('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
-  const { username, email: emailAddr, password, is_admin } = req.body || {};
+  const { username, email: emailAddr, password, is_admin, password_never_expires } = req.body || {};
   const updates = {};
 
   if (username !== undefined) {
@@ -1803,6 +1803,9 @@ app.patch('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
     if (req.user.id === id && !is_admin) return res.status(400).json({ error: 'Eigene Admin-Rechte können nicht entzogen werden' });
     updates.isAdmin = !!is_admin;
   }
+  if (password_never_expires !== undefined) {
+    updates.passwordNeverExpires = !!password_never_expires;
+  }
   if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'Keine Änderungen' });
 
   try {
@@ -1810,7 +1813,7 @@ app.patch('/api/admin/users/:id', authMiddleware, requireAdmin, (req, res) => {
     if (!user) return res.status(404).json({ error: 'Benutzer nicht gefunden' });
     const ip = req.headers['x-forwarded-for'] || req.socket.remoteAddress;
     db.logAudit(req.user.id, 'user_updated', 'user', id, { changed: Object.keys(updates) }, ip);
-    res.json({ id: user.id, username: user.username, email: user.email || null, is_admin: user.is_admin });
+    res.json({ id: user.id, username: user.username, email: user.email || null, is_admin: user.is_admin, password_never_expires: user.password_never_expires });
   } catch (err) {
     if (err.code === 'USERNAME_TAKEN') return res.status(409).json({ error: err.message });
     throw err;

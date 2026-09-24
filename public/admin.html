@@ -684,6 +684,13 @@
         </label>
         <div class="hint" id="editUserAdminNote" style="display:none;">Eigene Admin-Rechte können nicht entzogen werden.</div>
       </div>
+      <div class="settings-group" style="margin-top:12px;">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+          <input type="checkbox" id="editUserPasswordNeverExpires">
+          Passwort läuft nicht ab
+        </label>
+        <div class="hint">Unterdrückt die Erinnerung, das Passwort zu ändern, für diesen Benutzer.</div>
+      </div>
       <div class="form-error" id="editUserError" style="display:none;margin-top:12px;"></div>
       <div class="form-success" id="editUserSuccess" style="display:none;margin-top:12px;"></div>
       <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;">
@@ -1398,6 +1405,7 @@
       adminCb.checked = !!user.is_admin;
       adminCb.disabled = _editUserIsSelf; // can't remove own admin
       document.getElementById('editUserAdminNote').style.display = _editUserIsSelf ? 'block' : 'none';
+      document.getElementById('editUserPasswordNeverExpires').checked = !!user.password_never_expires;
       document.getElementById('editUserError').style.display = 'none';
       document.getElementById('editUserSuccess').style.display = 'none';
       document.getElementById('editUserModal').style.display = 'flex';
@@ -1413,13 +1421,14 @@
       const email = document.getElementById('editUserEmail').value.trim();
       const password = document.getElementById('editUserPassword').value;
       const is_admin = document.getElementById('editUserAdmin').checked;
+      const password_never_expires = document.getElementById('editUserPasswordNeverExpires').checked;
       const errEl = document.getElementById('editUserError');
       const okEl = document.getElementById('editUserSuccess');
       errEl.style.display = 'none'; okEl.style.display = 'none';
 
       if (!username) { errEl.textContent = 'Benutzername darf nicht leer sein.'; errEl.style.display = 'block'; return; }
 
-      const body = { username, email: email || null, is_admin };
+      const body = { username, email: email || null, is_admin, password_never_expires };
       if (password) body.password = password;
 
       const res = await fetch(`/api/admin/users/${_editUserId}`, {
