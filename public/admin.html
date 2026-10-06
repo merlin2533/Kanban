@@ -662,7 +662,7 @@
 
   <!-- Edit User Modal -->
   <div id="editUserModal" style="display:none;position:fixed;inset:0;z-index:1000;background:rgba(0,0,0,.5);align-items:center;justify-content:center;">
-    <div style="background:#fff;border-radius:10px;padding:28px 32px;min-width:360px;max-width:95vw;box-shadow:0 4px 24px rgba(0,0,0,.2);">
+    <div style="background:#fff;border-radius:10px;padding:28px 32px;min-width:360px;max-width:95vw;max-height:90vh;overflow-y:auto;box-shadow:0 4px 24px rgba(0,0,0,.2);">
       <h3 style="margin:0 0 20px;font-size:16px;">Benutzer bearbeiten</h3>
       <div class="settings-group">
         <label for="editUsernameInput">Benutzername</label>
@@ -691,6 +691,11 @@
         </label>
         <div class="hint">Unterdrückt die Erinnerung, das Passwort zu ändern, für diesen Benutzer.</div>
       </div>
+      <div class="board-check-section" id="editUserBoardsSection" style="margin-top:12px;display:none;">
+        <span class="section-label">Board-Zugriff:</span>
+        <div class="board-check-list" id="editUserBoards" style="max-width:520px;"></div>
+      </div>
+      <div class="hint" id="editUserBoardsAdminNote" style="display:none;margin-top:12px;">Admins haben Zugriff auf alle Boards.</div>
       <div class="form-error" id="editUserError" style="display:none;margin-top:12px;"></div>
       <div class="form-success" id="editUserSuccess" style="display:none;margin-top:12px;"></div>
       <div style="display:flex;gap:8px;margin-top:20px;justify-content:flex-end;">
@@ -771,6 +776,9 @@
     });
 
     // --- Users ---
+    let _allBoards = [];
+    let _userBoardIdsMap = {};
+
     async function loadUsers() {
       const [usersRes, boardsRes] = await Promise.all([
         fetch('/api/admin/users'),
@@ -781,6 +789,7 @@
 
       // Build user→boards mapping from all board member lists
       const userBoardsMap = {};
+      const userBoardIdsMap = {};
       if (Array.isArray(allBoards) && allBoards.length > 0) {
         const memberResults = await Promise.all(
           allBoards.map(b => fetch('/api/boards/' + b.id + '/members').then(r => r.json()).catch(() => []))
@@ -791,10 +800,15 @@
             if (!m.is_admin) {
               if (!userBoardsMap[m.id]) userBoardsMap[m.id] = [];
               userBoardsMap[m.id].push(board.title);
+              if (!userBoardIdsMap[m.id]) userBoardIdsMap[m.id] = [];
+              userBoardIdsMap[m.id].push(board.id);
             }
           }
         });
       }
+
+      _allBoards = Array.isArray(allBoards) ? allBoards : [];
+      _userBoardIdsMap = userBoardIdsMap;
 
       const list = document.getElementById('userList');
       list.innerHTML = '';
@@ -1394,6 +1408,34 @@
     // --- Edit User Modal ---
     let _editUserId = null;
     let _editUserIsSelf = false;
+    let _editUserBoardIds = [];
+
+    function renderEditUserBoards() {
+      const container = document.getElementById('editUserBoards');
+      container.innerHTML = '';
+      for (const board of _allBoards) {
+        const label = document.createElement('label');
+        label.className = 'board-check-label';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = board.id;
+        cb.checked = _editUserBoardIds.includes(board.id);
+        const span = document.createElement('span');
+        span.textContent = board.title;
+        label.appendChild(cb);
+        label.appendChild(span);
+        container.appendChild(label);
+      }
+    }
+
+    function updateEditUserBoardsVisibility() {
+      const isAdmin = document.getElementById('editUserAdmin').checked;
+      const hasBoards = _allBoards.length > 0;
+      document.getElementById('editUserBoardsSection').style.display = (!isAdmin && hasBoards) ? 'block' : 'none';
+      document.getElementById('editUserBoardsAdminNote').style.display = (isAdmin && hasBoards) ? 'block' : 'none';
+    }
+
+    document.getElementById('editUserAdmin').addEventListener('change', updateEditUserBoardsVisibility);
 
     function openEditUserModal(user) {
       _editUserId = user.id;
@@ -1406,6 +1448,9 @@
       adminCb.disabled = _editUserIsSelf; // can't remove own admin
       document.getElementById('editUserAdminNote').style.display = _editUserIsSelf ? 'block' : 'none';
       document.getElementById('editUserPasswordNeverExpires').checked = !!user.password_never_expires;
+      _editUserBoardIds = (_userBoardIdsMap[user.id] || []).slice();
+      renderEditUserBoards();
+      updateEditUserBoardsVisibility();
       document.getElementById('editUserError').style.display = 'none';
       document.getElementById('editUserSuccess').style.display = 'none';
       document.getElementById('editUserModal').style.display = 'flex';
@@ -1437,6 +1482,31 @@
         body: JSON.stringify(body)
       });
       if (res.ok) {
+        // Sync board access (only relevant for non-admin users)
+        if (!is_admin) {
+          const selected = Array.from(document.querySelectorAll('#editUserBoards input[type=checkbox]:checked'))
+            .map(cb => cb.value);
+          const toAdd = selected.filter(id => !_editUserBoardIds.includes(id));
+          const toRemove = _editUserBoardIds.filter(id => !selected.includes(id));
+          const results = await Promise.all([
+            ...toAdd.map(id => fetch('/api/boards/' + id + '/members', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+              body: JSON.stringify({ user_id: _editUserId })
+            })),
+            ...toRemove.map(id => fetch('/api/boards/' + id + '/members/' + _editUserId, {
+              method: 'DELETE', headers: { 'X-Requested-With': 'kanban' }
+            }))
+          ]);
+          if (results.some(r => !r.ok)) {
+            errEl.textContent = 'Benutzer gespeichert, aber Board-Zugriff konnte nicht vollständig aktualisiert werden.';
+            errEl.style.display = 'block';
+            loadUsers();
+            loadBoardAccess();
+            return;
+          }
+          if (toAdd.length || toRemove.length) loadBoardAccess();
+        }
         okEl.textContent = 'Gespeichert!';
         okEl.style.display = 'block';
         setTimeout(() => {
