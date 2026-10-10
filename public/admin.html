@@ -820,6 +820,7 @@
         loadBoardDownloads();
         loadSettings();
         loadNewUserBoardOptions();
+        if (location.hash === '#mcp') document.querySelector('.tab[data-tab=mcp]').click();
       } catch { window.location.href = '/login.html'; }
     }
 

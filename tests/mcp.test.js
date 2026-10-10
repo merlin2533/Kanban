@@ -73,6 +73,15 @@ describe('MCP server', () => {
     readToken = (await authPost(base, '/api/admin/mcp/tokens', { name: 'Read', read_only: true }, cookie)).body.token;
   });
 
+  it('GET /api/mcp/info shows status and only own tokens', async () => {
+    const res = await authGet(base, '/api/mcp/info', cookie);
+    assert.equal(res.status, 200);
+    assert.equal(res.body.enabled, true);
+    assert.ok(res.body.tools.length > 10);
+    assert.deepEqual(res.body.my_tokens.map(t => t.name).sort(), ['Claude Code', 'Read']);
+    assert.ok(res.body.my_tokens.every(t => t.token === undefined));
+  });
+
   it('rejects missing and invalid tokens', async () => {
     const none = await mcpCall(null, { jsonrpc: '2.0', id: 1, method: 'ping' });
     assert.equal(none.status, 401);
