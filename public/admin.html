@@ -336,6 +336,8 @@
     .audit-badge.access_link_deleted { background: #fef2f2; color: #dc2626; }
     .audit-badge.webhook_created { background: #f0fdf4; color: #16a34a; }
     .audit-badge.webhook_deleted { background: #fef2f2; color: #dc2626; }
+    .audit-badge.api_token_created { background: #f0fdf4; color: #16a34a; }
+    .audit-badge.api_token_deleted { background: #fef2f2; color: #dc2626; }
     .audit-badge.default { background: #f1f5f9; color: #64748b; }
     .audit-pagination {
       display: flex; align-items: center; gap: 8px; margin-top: 16px;
@@ -348,15 +350,33 @@
       .audit-table td { border-color: #1e293b; color: #e2e8f0; }
       .audit-table tr:hover td { background: #1e293b; }
       .audit-badge.login_failed, .audit-badge.user_deleted, .audit-badge.board_deleted,
-      .audit-badge.access_link_deleted, .audit-badge.webhook_deleted { background: #3b1c1c; }
+      .audit-badge.access_link_deleted, .audit-badge.webhook_deleted, .audit-badge.api_token_deleted { background: #3b1c1c; }
       .audit-badge.login_success, .audit-badge.board_created,
-      .audit-badge.webhook_created { background: #0a2e1a; }
+      .audit-badge.webhook_created, .audit-badge.api_token_created { background: #0a2e1a; }
       .audit-badge.user_created, .audit-badge.access_link_created { background: #1e3a5f; }
       .audit-badge.settings_changed { background: #2d2000; }
       .audit-badge.password_changed { background: #2d1649; }
       .audit-badge.default { background: #334155; }
       .audit-details-cell { color: #94a3b8; }
       .audit-details-cell:hover { color: #e2e8f0; }
+    }
+
+    /* MCP */
+    .mcp-code {
+      font-family: monospace; font-size: 12px; background: #f8fafc; color: #1e293b;
+      border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px;
+      white-space: pre-wrap; word-break: break-all; margin: 0;
+    }
+    .mcp-token-row {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      padding: 10px 0; border-bottom: 1px solid #f1f5f9; font-size: 13px;
+    }
+    .mcp-token-row:last-child { border-bottom: none; }
+    .mcp-token-meta { color: #64748b; font-size: 12px; }
+    .mcp-new-token { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 10px; padding: 14px; margin-top: 14px; }
+    .mcp-tool {
+      display: inline-block; font-family: monospace; font-size: 12px; padding: 3px 8px; margin: 0 6px 6px 0;
+      border-radius: 6px; border: 1px solid #e2e8f0; background: #f8fafc; color: #334155;
     }
 
     /* Settings */
@@ -377,6 +397,10 @@
     @media (prefers-color-scheme: dark) {
       .settings-group label { color: #94a3b8; }
       .api-key-display { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+      .mcp-code { background: #0f172a !important; color: #e2e8f0 !important; border-color: #475569 !important; }
+      .mcp-token-row { border-color: #334155 !important; }
+      .mcp-new-token { background: #052e16 !important; border-color: #166534 !important; }
+      .mcp-tool { background: #1e293b !important; border-color: #475569 !important; color: #cbd5e1 !important; }
       .btn-secondary { background: #334155; color: #cbd5e1; border-color: #475569; }
       .btn-secondary:hover { background: #475569; }
       #editUserModal > div { background: #1e293b !important; color: #e2e8f0; }
@@ -407,6 +431,7 @@
       <button class="tab" data-tab="access">Board-Zugriff</button>
       <button class="tab" data-tab="export">Daten & Export</button>
       <button class="tab" data-tab="settings">Einstellungen</button>
+      <button class="tab" data-tab="mcp">MCP / Claude</button>
       <button class="tab" data-tab="auditlog">Audit-Log</button>
     </div>
 
@@ -584,6 +609,78 @@
       </div>
     </div>
 
+    <!-- MCP tab -->
+    <div class="tab-panel" id="tab-mcp">
+      <div class="admin-card">
+        <h2>MCP-Server</h2>
+        <p style="color:#64748b;font-size:13px;margin-bottom:16px;">
+          Über den MCP-Server (Model Context Protocol) können KI-Assistenten wie Claude Code die Boards lesen und
+          bearbeiten – z.&nbsp;B. Karten anlegen, verschieben, kommentieren oder Checklisten abhaken.
+          Jeder Token gehört zu einem Benutzer und hat genau dessen Board-Zugriff.
+        </p>
+        <div class="settings-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;">
+            <input type="checkbox" id="mcpEnabled"> MCP-Server aktivieren
+          </label>
+          <div class="hint">Ist der Server deaktiviert, werden alle Tokens abgelehnt.</div>
+        </div>
+        <div class="settings-group">
+          <label>Server-URL</label>
+          <div class="api-key-row">
+            <span class="api-key-display" id="mcpUrl"></span>
+            <button class="btn-secondary" data-copy-target="mcpUrl">Kopieren</button>
+          </div>
+          <div class="hint">Transport: Streamable HTTP · Authentifizierung: <code>Authorization: Bearer &lt;Token&gt;</code></div>
+        </div>
+        <div class="form-error" id="mcpError"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>Tokens</h2>
+        <div class="form-row">
+          <input type="text" class="form-input" id="mcpTokenName" placeholder="Name, z. B. Claude Code Laptop" maxlength="100">
+          <select class="form-select" id="mcpTokenUser" title="Benutzer, als der der Token handelt"></select>
+          <label class="checkbox-label"><input type="checkbox" id="mcpTokenReadOnly"> Nur lesen</label>
+          <button class="btn-primary" id="mcpCreateTokenBtn">Token erstellen</button>
+        </div>
+        <div class="form-error" id="mcpTokenError"></div>
+
+        <div class="mcp-new-token" id="mcpNewToken" style="display:none;">
+          <strong style="font-size:14px;">Token erstellt – jetzt kopieren, er wird nur einmal angezeigt!</strong>
+          <div class="settings-group" style="margin-top:12px;">
+            <label>Token</label>
+            <div class="api-key-row">
+              <span class="api-key-display" id="mcpNewTokenValue"></span>
+              <button class="btn-secondary" data-copy-target="mcpNewTokenValue">Kopieren</button>
+            </div>
+          </div>
+          <div class="settings-group">
+            <label>Mit Claude Code verbinden (im Terminal ausführen)</label>
+            <pre class="mcp-code" id="mcpCliCommand"></pre>
+            <div style="margin-top:6px;"><button class="btn-secondary" data-copy-target="mcpCliCommand">Befehl kopieren</button></div>
+            <div class="hint">
+              <code>--scope user</code> = in allen Projekten verfügbar. Ohne <code>--scope</code> gilt der Server nur im aktuellen Projekt.
+              Danach in Claude Code mit <code>/mcp</code> prüfen.
+            </div>
+          </div>
+          <div class="settings-group" style="margin-bottom:0;">
+            <label>Alternativ: <code>.mcp.json</code> im Projekt</label>
+            <pre class="mcp-code" id="mcpJsonConfig"></pre>
+            <div style="margin-top:6px;"><button class="btn-secondary" data-copy-target="mcpJsonConfig">JSON kopieren</button></div>
+            <div class="hint">Den Token nicht ins Git-Repo committen – besser <code>${KANBAN_MCP_TOKEN}</code> als Umgebungsvariable verwenden.</div>
+          </div>
+        </div>
+
+        <div id="mcpTokenList" style="margin-top:16px;"></div>
+      </div>
+
+      <div class="admin-card">
+        <h2>Verfügbare Tools</h2>
+        <p style="color:#64748b;font-size:13px;margin-bottom:12px;">✎ = schreibendes Tool. Nur-lesen-Tokens sehen nur die lesenden Tools.</p>
+        <div id="mcpToolList"></div>
+      </div>
+    </div>
+
     <!-- Audit Log tab -->
     <div class="tab-panel" id="tab-auditlog">
       <div class="admin-card">
@@ -608,6 +705,8 @@
               <option value="access_link_deleted">Zugangslink gelöscht</option>
               <option value="webhook_created">Webhook erstellt</option>
               <option value="webhook_deleted">Webhook gelöscht</option>
+              <option value="api_token_created">MCP-Token erstellt</option>
+              <option value="api_token_deleted">MCP-Token widerrufen</option>
             </select>
           </label>
           <label>Von
@@ -734,6 +833,7 @@
         if (tab.dataset.tab === 'access') loadBoardAccess();
         else if (tab.dataset.tab === 'export') loadBoardDownloads();
         else if (tab.dataset.tab === 'settings') loadSettings();
+        else if (tab.dataset.tab === 'mcp') loadMcp();
         else if (tab.dataset.tab === 'auditlog') { auditOffset = 0; loadAuditLog(); }
       });
     });
@@ -1253,6 +1353,144 @@
       }
     });
 
+    // --- MCP ---
+    const mcpUrl = location.origin + '/mcp';
+
+    function fmtDate(s) {
+      if (!s) return '–';
+      const d = new Date(s.replace(' ', 'T') + 'Z');
+      return isNaN(d) ? s : d.toLocaleString('de-DE', { dateStyle: 'short', timeStyle: 'short' });
+    }
+
+    async function loadMcp() {
+      document.getElementById('mcpUrl').textContent = mcpUrl;
+      const [infoRes, usersRes] = await Promise.all([fetch('/api/admin/mcp'), fetch('/api/admin/users')]);
+      if (!infoRes.ok) return;
+      const info = await infoRes.json();
+      const users = usersRes.ok ? await usersRes.json() : [];
+      document.getElementById('mcpEnabled').checked = info.enabled;
+
+      const sel = document.getElementById('mcpTokenUser');
+      const prev = sel.value;
+      sel.innerHTML = '';
+      for (const u of users) {
+        const opt = document.createElement('option');
+        opt.value = u.id;
+        opt.textContent = 'als ' + u.username + (u.is_admin ? ' (Admin)' : '');
+        sel.appendChild(opt);
+      }
+      sel.value = prev || String(currentUser.id);
+
+      const list = document.getElementById('mcpTokenList');
+      list.innerHTML = '';
+      if (info.tokens.length === 0) {
+        list.innerHTML = '<div class="empty-state">Noch keine Tokens.</div>';
+      }
+      for (const t of info.tokens) {
+        const row = document.createElement('div');
+        row.className = 'mcp-token-row';
+        const main = document.createElement('div');
+        main.style.flex = '1';
+        main.style.minWidth = '200px';
+        const name = document.createElement('strong');
+        name.textContent = t.name;
+        main.appendChild(name);
+        const badge = document.createElement('span');
+        badge.className = 'user-badge ' + (t.read_only ? 'user' : 'admin');
+        badge.style.marginLeft = '8px';
+        badge.textContent = t.read_only ? 'Nur lesen' : 'Lesen & Schreiben';
+        main.appendChild(badge);
+        const meta = document.createElement('div');
+        meta.className = 'mcp-token-meta';
+        meta.textContent = 'Benutzer: ' + t.username + ' · ' + t.token_prefix + '… · erstellt ' + fmtDate(t.created_at)
+          + ' · zuletzt benutzt ' + fmtDate(t.last_used_at);
+        main.appendChild(meta);
+        row.appendChild(main);
+        const del = document.createElement('button');
+        del.className = 'btn-danger';
+        del.textContent = 'Widerrufen';
+        del.onclick = async () => {
+          if (!confirm('Token "' + t.name + '" widerrufen? Verbundene Clients verlieren sofort den Zugriff.')) return;
+          await fetch('/api/admin/mcp/tokens/' + t.id, { method: 'DELETE', headers: { 'X-Requested-With': 'kanban' } });
+          loadMcp();
+        };
+        row.appendChild(del);
+        list.appendChild(row);
+      }
+
+      const tools = document.getElementById('mcpToolList');
+      tools.innerHTML = '';
+      for (const tool of info.tools) {
+        const el = document.createElement('span');
+        el.className = 'mcp-tool';
+        el.textContent = tool.name + (tool.read ? '' : ' ✎');
+        el.title = tool.description;
+        tools.appendChild(el);
+      }
+    }
+
+    document.getElementById('mcpEnabled').addEventListener('change', async (e) => {
+      const errEl = document.getElementById('mcpError');
+      errEl.style.display = 'none';
+      const res = await fetch('/api/admin/mcp', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({ enabled: e.target.checked })
+      });
+      if (!res.ok) {
+        e.target.checked = !e.target.checked;
+        errEl.textContent = 'Speichern fehlgeschlagen.';
+        errEl.style.display = 'block';
+      }
+    });
+
+    document.getElementById('mcpCreateTokenBtn').addEventListener('click', async () => {
+      const errEl = document.getElementById('mcpTokenError');
+      errEl.style.display = 'none';
+      const name = document.getElementById('mcpTokenName').value.trim();
+      if (!name) { errEl.textContent = 'Bitte einen Namen angeben.'; errEl.style.display = 'block'; return; }
+      const res = await fetch('/api/admin/mcp/tokens', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Requested-With': 'kanban' },
+        body: JSON.stringify({
+          name,
+          user_id: parseInt(document.getElementById('mcpTokenUser').value),
+          read_only: document.getElementById('mcpTokenReadOnly').checked
+        })
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { errEl.textContent = d.error || 'Fehler beim Erstellen.'; errEl.style.display = 'block'; return; }
+
+      document.getElementById('mcpTokenName').value = '';
+      document.getElementById('mcpTokenReadOnly').checked = false;
+      document.getElementById('mcpNewTokenValue').textContent = d.token;
+      document.getElementById('mcpCliCommand').textContent =
+        'claude mcp add --transport http --scope user kanban ' + mcpUrl + ' \\\n  --header "Authorization: Bearer ' + d.token + '"';
+      document.getElementById('mcpJsonConfig').textContent = JSON.stringify({
+        mcpServers: {
+          kanban: { type: 'http', url: mcpUrl, headers: { Authorization: 'Bearer ${KANBAN_MCP_TOKEN}' } }
+        }
+      }, null, 2);
+      document.getElementById('mcpNewToken').style.display = 'block';
+      if (!document.getElementById('mcpEnabled').checked) {
+        errEl.textContent = 'Hinweis: Der MCP-Server ist noch deaktiviert – oben aktivieren, sonst wird der Token abgelehnt.';
+        errEl.style.display = 'block';
+      }
+      loadMcp();
+    });
+
+    document.querySelectorAll('[data-copy-target]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const text = document.getElementById(btn.dataset.copyTarget).textContent;
+        if (!text) return;
+        const label = btn.textContent;
+        navigator.clipboard.writeText(text).then(() => {
+          btn.textContent = 'Kopiert!';
+          setTimeout(() => btn.textContent = label, 2000);
+        }).catch(() => {});
+      });
+    });
+
     // --- Audit Log ---
     let auditOffset = 0;
     const auditLimit = 50;
@@ -1319,7 +1557,8 @@
         const badgeClass = item.action_type in {
           login_success:1, login_failed:1, user_created:1, user_deleted:1,
           board_created:1, board_deleted:1, settings_changed:1, password_changed:1,
-          access_link_created:1, access_link_deleted:1, webhook_created:1, webhook_deleted:1
+          access_link_created:1, access_link_deleted:1, webhook_created:1, webhook_deleted:1,
+          api_token_created:1, api_token_deleted:1
         } ? item.action_type : 'default';
         badge.className = 'audit-badge ' + badgeClass;
         badge.textContent = item.action_type;

@@ -379,6 +379,22 @@ try { db.prepare('ALTER TABLE cards ADD COLUMN color TEXT DEFAULT NULL').run(); 
 // Migration: add password_never_expires column to users (per-user: skip the password-age reminder)
 try { db.prepare('ALTER TABLE users ADD COLUMN password_never_expires INTEGER DEFAULT 0').run(); } catch {}
 
+// API tokens (used by the MCP server). Only a SHA-256 hash of the token is stored.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS api_tokens (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    token_hash TEXT NOT NULL UNIQUE,
+    token_prefix TEXT NOT NULL,
+    read_only INTEGER NOT NULL DEFAULT 0,
+    created_by INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    created_at TEXT DEFAULT (datetime('now')),
+    last_used_at TEXT DEFAULT NULL
+  );
+  CREATE INDEX IF NOT EXISTS idx_api_tokens_user_id ON api_tokens(user_id);
+`);
+
 // Card templates table (per-board)
 db.exec(`
   CREATE TABLE IF NOT EXISTS card_templates (
@@ -614,6 +630,7 @@ const AUDIT_ACTION_TYPES = [
   'password_changed',
   'access_link_created', 'access_link_deleted',
   'webhook_created', 'webhook_deleted',
+  'api_token_created', 'api_token_deleted',
 ];
 
 function logAudit(userId, actionType, targetType, targetId, details, ipAddress) {
@@ -1794,6 +1811,51 @@ function getPushSubscriptionsForUsers(userIds) {
 
 // --- Raw DB access ---
 
+// --- API Tokens (MCP) ---
+function hashApiToken(token) {
+  return crypto.createHash('sha256').update(String(token)).digest('hex');
+}
+
+function createApiToken(userId, name, readOnly, createdBy) {
+  const token = 'kbn_' + crypto.randomBytes(32).toString('base64url');
+  const info = db.prepare(
+    'INSERT INTO api_tokens (user_id, name, token_hash, token_prefix, read_only, created_by) VALUES (?, ?, ?, ?, ?, ?)'
+  ).run(userId, name, hashApiToken(token), token.slice(0, 12), readOnly ? 1 : 0, createdBy || null);
+  return { id: info.lastInsertRowid, token };
+}
+
+function getApiTokens() {
+  return db.prepare(`
+    SELECT t.id, t.user_id, u.username, u.is_admin, t.name, t.token_prefix, t.read_only, t.created_at, t.last_used_at
+    FROM api_tokens t JOIN users u ON u.id = t.user_id
+    ORDER BY t.created_at DESC, t.id DESC
+  `).all();
+}
+
+// Look up the user behind a raw token; returns null for unknown tokens.
+function getApiTokenUser(token) {
+  if (typeof token !== 'string' || !token.startsWith('kbn_')) return null;
+  const row = db.prepare(`
+    SELECT t.id AS token_id, t.read_only, t.last_used_at, u.id AS user_id, u.username, u.is_admin, u.password_changed_at
+    FROM api_tokens t JOIN users u ON u.id = t.user_id
+    WHERE t.token_hash = ?
+  `).get(hashApiToken(token));
+  if (!row) return null;
+  // Throttle last_used_at writes to once per minute per token
+  const last = row.last_used_at ? Date.parse(row.last_used_at.replace(' ', 'T') + 'Z') : 0;
+  if (Date.now() - last > 60 * 1000) {
+    db.prepare("UPDATE api_tokens SET last_used_at = datetime('now') WHERE id = ?").run(row.token_id);
+  }
+  return row;
+}
+
+function deleteApiToken(id) {
+  const row = db.prepare('SELECT id, user_id, name FROM api_tokens WHERE id = ?').get(id);
+  if (!row) return null;
+  db.prepare('DELETE FROM api_tokens WHERE id = ?').run(id);
+  return row;
+}
+
 function getDb() { return db; }
 
 module.exports = {
@@ -1855,6 +1917,8 @@ module.exports = {
   watchCard, unwatchCard, getCardWatchers, isWatchingCard, getWatchedCardIds,
   // Push Subscriptions
   savePushSubscription, removePushSubscription, getPushSubscriptionsForUser, getPushSubscriptionsForUsers,
+  // API Tokens (MCP)
+  createApiToken, getApiTokens, getApiTokenUser, deleteApiToken,
   // Raw DB
   getDb,
 };
