@@ -7,6 +7,7 @@ const https = require('https');
 const webpush = require('web-push');
 const db = require('./db');
 const email = require('./email');
+const mcp = require('./mcp');
 
 const app = express();
 const PORT = parseInt(process.env.PORT, 10) || 3000;
@@ -31,6 +32,7 @@ db.initSetting('reminder_escalation_days', process.env.REMINDER_ESCALATION_DAYS 
 db.initSetting('weekly_digest_enabled',    process.env.WEEKLY_DIGEST_ENABLED    || '1');
 db.initSetting('weekly_digest_day',        process.env.WEEKLY_DIGEST_DAY        || '1'); // 0=So, 1=Mo, …, 6=Sa
 db.initSetting('weekly_digest_hour',       process.env.WEEKLY_DIGEST_HOUR       || '8');
+db.initSetting('mcp_enabled',              process.env.MCP_ENABLED              || '0');
 db.initSetting('api_key',                  process.env.API_KEY                  || require('crypto').randomBytes(24).toString('hex'));
 
 // --- VAPID keys for Web Push ---
@@ -122,6 +124,25 @@ function parseCookies(req) {
 // --- Auth middleware ---
 function authMiddleware(req, res, next) {
   authLog(`middleware: ${req.method} ${req.originalUrl}`);
+  // API token (MCP) – "Authorization: Bearer kbn_..."; acts as the token's user.
+  // Not sent automatically by browsers, so no CSRF header is required.
+  const authHeader = req.headers.authorization;
+  if (authHeader && /^Bearer\s+/i.test(authHeader)) {
+    const tok = db.getSetting('mcp_enabled') === '1'
+      ? db.getApiTokenUser(authHeader.replace(/^Bearer\s+/i, '').trim())
+      : null;
+    if (!tok) return res.status(401).json({ error: 'Invalid or disabled API token' });
+    if (req.path.startsWith('/api/admin') || req.originalUrl.startsWith('/api/admin')) {
+      return res.status(403).json({ error: 'API tokens cannot access admin endpoints' });
+    }
+    if (tok.read_only && !['GET', 'HEAD'].includes(req.method)) {
+      return res.status(403).json({ error: 'Read-only API token' });
+    }
+    req.user = { id: tok.user_id, username: tok.username, is_admin: tok.is_admin, password_changed_at: tok.password_changed_at };
+    req.apiToken = { id: tok.token_id, read_only: !!tok.read_only };
+    req.permission = tok.read_only ? 'view' : 'admin';
+    return next();
+  }
   const accessToken = req.query.token;
   if (accessToken) {
     const link = db.getBoardAccessLink(accessToken);
@@ -171,7 +192,7 @@ function requireBoardEdit(req, res, next) {
 }
 
 function requireAdmin(req, res, next) {
-  if (!req.user || !req.user.is_admin) {
+  if (!req.user || !req.user.is_admin || req.apiToken) {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();
@@ -1940,6 +1961,48 @@ app.get('/api/admin/audit-log/export', authMiddleware, requireAdmin, (req, res) 
   res.setHeader('Content-Type', 'text/csv; charset=utf-8');
   res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
   res.send('\uFEFF' + csv); // BOM for Excel compatibility
+});
+
+// --- MCP server (Model Context Protocol) ---
+app.use('/mcp', mcp.createMcpRouter({ db }));
+
+app.get('/api/admin/mcp', authMiddleware, requireAdmin, (req, res) => {
+  res.json({
+    enabled: db.getSetting('mcp_enabled') === '1',
+    tokens: db.getApiTokens().map(t => ({ ...t, read_only: !!t.read_only, is_admin: !!t.is_admin })),
+    tools: mcp.TOOLS,
+  });
+});
+
+app.put('/api/admin/mcp', authMiddleware, requireAdmin, (req, res) => {
+  if (typeof req.body.enabled !== 'boolean') return res.status(400).json({ error: 'enabled (boolean) required' });
+  db.setSetting('mcp_enabled', req.body.enabled ? '1' : '0');
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'settings_changed', 'settings', null, { changed_keys: ['mcp_enabled'], value: req.body.enabled }, ip);
+  res.json({ enabled: req.body.enabled });
+});
+
+app.post('/api/admin/mcp/tokens', authMiddleware, requireAdmin, (req, res) => {
+  const name = validString(req.body.name, 100);
+  if (!name) return res.status(400).json({ error: 'name required (max 100 chars)' });
+  const userId = req.body.user_id === undefined ? req.user.id : validId(req.body.user_id);
+  const user = userId ? db.getUserById(userId) : null;
+  if (!user) return res.status(400).json({ error: 'User not found' });
+  const readOnly = !!req.body.read_only;
+  const { id, token } = db.createApiToken(user.id, name, readOnly, req.user.id);
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'api_token_created', 'api_token', id, { name, for_user: user.username, read_only: readOnly }, ip);
+  res.status(201).json({ id, token, name, user_id: user.id, username: user.username, read_only: readOnly });
+});
+
+app.delete('/api/admin/mcp/tokens/:id', authMiddleware, requireAdmin, (req, res) => {
+  const id = validId(req.params.id);
+  if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const row = db.deleteApiToken(id);
+  if (!row) return res.status(404).json({ error: 'Token not found' });
+  const ip = req.ip || req.connection.remoteAddress;
+  db.logAudit(req.user.id, 'api_token_deleted', 'api_token', id, { name: row.name }, ip);
+  res.json({ ok: true });
 });
 
 // --- Global error handler ---

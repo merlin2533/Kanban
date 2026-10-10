@@ -112,6 +112,7 @@ Alle Einstellungen via Environment-Variablen:
 | `BASE_URL` | `http://localhost:3000` | Externe URL |
 | `ADMIN_USER` | `admin` | Standard-Admin Benutzername (nur beim ersten Start) |
 | `ADMIN_PASSWORD` | `admin` | Standard-Admin Passwort (nur beim ersten Start) |
+| `MCP_ENABLED` | `0` | MCP-Server beim ersten Start aktivieren (danach im Admin-Bereich schaltbar) |
 
 ## Benutzerverwaltung
 
@@ -120,6 +121,39 @@ Alle Einstellungen via Environment-Variablen:
 3. Unter "Benutzerverwaltung":
    - Neue Benutzer anlegen (mit/ohne Admin-Rechte)
    - Benutzer loschen
+
+## MCP-Server (Claude Code & andere KI-Assistenten)
+
+Das Board bringt einen eingebauten [MCP-Server](https://modelcontextprotocol.io) mit, über den KI-Assistenten
+wie Claude Code Boards lesen und bearbeiten können (Karten anlegen, ändern, verschieben, kommentieren,
+Checklisten abhaken, Labels und Zuständige setzen …).
+
+**Einrichten**
+
+1. Als Admin unter **Admin → MCP / Claude** den MCP-Server aktivieren.
+2. Einen Token erstellen und auswählen, *als welcher Benutzer* er handelt. Der Token hat genau den
+   Board-Zugriff dieses Benutzers. Optional „Nur lesen“.
+3. Den angezeigten Befehl im Terminal ausführen (der Token wird nur einmal angezeigt):
+
+   ```bash
+   claude mcp add --transport http --scope user kanban https://kanban.example.com/mcp \
+     --header "Authorization: Bearer kbn_..."
+   ```
+
+4. In Claude Code mit `/mcp` prüfen – danach z. B.: *„Leg im Board RESQIO DEV eine Karte ‚Login-Bug‘ mit hoher Priorität an.“*
+
+**Technik**
+
+- Endpunkt `POST /mcp`, Transport *Streamable HTTP* (zustandslos, JSON-Antworten), Auth per `Authorization: Bearer <Token>`.
+- Schreibende Tools laufen intern über die normale REST-API – E-Mails, Push, Live-Updates und Webhooks
+  werden also genauso ausgelöst wie bei Änderungen in der Weboberfläche.
+- Tokens werden nur als SHA-256-Hash gespeichert, können jederzeit widerrufen werden und haben keinen Zugriff auf `/api/admin/*`.
+- Läuft das Board hinter einem Reverse-Proxy, muss neben `/api/` auch `/mcp` weitergeleitet werden.
+
+Tools: `list_boards`, `get_board`, `get_card`, `search_cards`, `list_labels`, `list_board_members`,
+`list_archived_cards`, `create_board`, `create_column`, `update_column`, `create_card`, `update_card`,
+`move_card`, `archive_card`, `restore_card`, `delete_card`, `add_comment`, `add_checklist_item`,
+`update_checklist_item`, `create_label`, `set_card_label`, `set_card_assignee`.
 
 ## Keyboard-Shortcuts
 
