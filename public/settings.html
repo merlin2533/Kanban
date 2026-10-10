@@ -116,6 +116,25 @@
       .pw-status { background: #334155; color: #94a3b8; }
       .pw-status.warn { background: #3b1c1c; color: #f87171; }
       .pw-status.ok { background: #0a2e1a; color: #4ade80; }
+      .mcp-code, .mcp-tool { background: #0f172a; color: #e2e8f0; border-color: #475569; }
+      .mcp-status.on { background: #0a2e1a; color: #4ade80; }
+      .mcp-status.off { background: #334155; color: #94a3b8; }
+      .mcp-info p, .mcp-info li { color: #94a3b8 !important; }
+    }
+    .mcp-info p, .mcp-info li { color: #64748b; font-size: 14px; line-height: 1.5; }
+    .mcp-info ol, .mcp-info ul { margin: 6px 0 14px 20px; }
+    .mcp-info h3 { font-size: 14px; margin: 16px 0 6px; }
+    .mcp-status { display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 10px; border-radius: 999px; margin-bottom: 12px; }
+    .mcp-status.on { background: #dcfce7; color: #166534; }
+    .mcp-status.off { background: #f1f5f9; color: #64748b; }
+    .mcp-code {
+      font-family: monospace; font-size: 12px; background: #f8fafc; color: #1e293b;
+      border: 1px solid #e2e8f0; border-radius: 8px; padding: 10px 12px;
+      white-space: pre-wrap; word-break: break-all; margin: 6px 0 4px;
+    }
+    .mcp-tool {
+      display: inline-block; font-size: 12px; padding: 2px 8px; margin: 0 6px 6px 0;
+      border-radius: 6px; border: 1px solid #e2e8f0; background: #f8fafc; color: #334155;
     }
   </style>
 </head>
@@ -163,6 +182,42 @@
       </div>
       <button class="btn-primary" id="saveEmailBtn">Speichern</button>
       <div id="emailResult" style="margin-top:12px;font-size:13px;"></div>
+    </div>
+
+    <div class="settings-card mcp-info" id="mcpInfoSection">
+      <h2>Claude &amp; KI-Assistenten (MCP)</h2>
+      <span class="mcp-status off" id="mcpStatus">Wird geladen…</span>
+      <p>
+        Das Board hat einen eingebauten MCP-Server (Model Context Protocol). Damit kannst du KI-Assistenten wie
+        <strong>Claude Code</strong> mit deinen Boards verbinden und per Text arbeiten lassen – Karten anlegen,
+        verschieben, kommentieren, Checklisten abhaken, Labels und Zuständige setzen. Claude sieht dabei genau
+        die Boards, auf die du Zugriff hast, und handelt in deinem Namen.
+      </p>
+
+      <h3>So verbindest du Claude Code</h3>
+      <ol>
+        <li>Lass dir von einem Admin einen <strong>MCP-Token</strong> erstellen (Admin → MCP / Claude).</li>
+        <li>Führe im Terminal aus (Token einsetzen):
+          <pre class="mcp-code" id="mcpCliExample"></pre>
+        </li>
+        <li>In Claude Code mit <code>/mcp</code> prüfen, ob „kanban“ verbunden ist.</li>
+      </ol>
+
+      <h3>Beispiele</h3>
+      <ul>
+        <li>„Zeig mir alle Karten mit hoher Priorität im Board RESQIO DEV.“</li>
+        <li>„Leg eine Karte ‚Login-Bug beheben‘ in ‚To Do‘ an, fällig Freitag, und weise sie mir zu.“</li>
+        <li>„Verschieb alle erledigten Karten nach ‚Done‘ und schreib jeweils einen kurzen Kommentar.“</li>
+        <li>„Mach aus diesen Notizen eine Checkliste an Karte 42.“</li>
+      </ul>
+
+      <div id="mcpMyTokens"></div>
+
+      <h3>Verfügbare Werkzeuge</h3>
+      <div id="mcpTools"></div>
+      <p id="mcpAdminHint" style="display:none;margin-top:8px;">
+        <a href="/admin.html#mcp">→ MCP-Server und Tokens im Admin-Bereich verwalten</a>
+      </p>
     </div>
 
     <div class="settings-card">
@@ -216,6 +271,8 @@
           pwAge.textContent = 'Passwort ist aktuell.';
           pwAge.classList.add('ok');
         }
+
+        loadMcpInfo();
 
         // Load email
         const profile = await fetch('/api/me/profile').then(r => r.json()).catch(() => ({}));
@@ -274,6 +331,47 @@
       await fetch('/api/auth/logout', { method: 'POST', headers: { 'X-Requested-With': 'kanban' } });
       window.location.href = '/login.html';
     };
+
+    async function loadMcpInfo() {
+      const url = location.origin + '/mcp';
+      document.getElementById('mcpCliExample').textContent =
+        'claude mcp add --transport http --scope user kanban ' + url + ' \\\n  --header "Authorization: Bearer <DEIN-TOKEN>"';
+      if (currentUser.is_admin) document.getElementById('mcpAdminHint').style.display = 'block';
+      try {
+        const info = await fetch('/api/mcp/info').then(r => r.json());
+        const status = document.getElementById('mcpStatus');
+        status.textContent = info.enabled ? 'Aktiv' : 'Vom Admin noch nicht aktiviert';
+        status.className = 'mcp-status ' + (info.enabled ? 'on' : 'off');
+
+        const tools = document.getElementById('mcpTools');
+        tools.innerHTML = '';
+        for (const t of info.tools || []) {
+          const el = document.createElement('span');
+          el.className = 'mcp-tool';
+          el.textContent = t.title || t.name;
+          el.title = t.name + ' – ' + t.description;
+          tools.appendChild(el);
+        }
+
+        const mine = document.getElementById('mcpMyTokens');
+        mine.innerHTML = '';
+        if (info.my_tokens && info.my_tokens.length) {
+          const h = document.createElement('h3');
+          h.textContent = 'Deine Tokens';
+          mine.appendChild(h);
+          const ul = document.createElement('ul');
+          for (const t of info.my_tokens) {
+            const li = document.createElement('li');
+            li.textContent = t.name + ' (' + t.token_prefix + '…, ' + (t.read_only ? 'nur lesen' : 'lesen & schreiben') + ')'
+              + (t.last_used_at ? ' – zuletzt benutzt ' + new Date(t.last_used_at.replace(' ', 'T') + 'Z').toLocaleString('de-DE') : ' – noch nie benutzt');
+            ul.appendChild(li);
+          }
+          mine.appendChild(ul);
+        }
+      } catch {
+        document.getElementById('mcpStatus').textContent = 'Status unbekannt';
+      }
+    }
 
     init();
 

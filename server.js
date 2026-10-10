@@ -1966,6 +1966,18 @@ app.get('/api/admin/audit-log/export', authMiddleware, requireAdmin, (req, res) 
 // --- MCP server (Model Context Protocol) ---
 app.use('/mcp', mcp.createMcpRouter({ db }));
 
+// Info for every logged-in user (settings page): is MCP on, which tools, own tokens
+app.get('/api/mcp/info', authMiddleware, (req, res) => {
+  if (!req.user) return res.status(403).json({ error: 'Login required' });
+  res.json({
+    enabled: db.getSetting('mcp_enabled') === '1',
+    tools: mcp.TOOLS,
+    my_tokens: db.getApiTokens()
+      .filter(t => t.user_id === req.user.id)
+      .map(t => ({ name: t.name, token_prefix: t.token_prefix, read_only: !!t.read_only, created_at: t.created_at, last_used_at: t.last_used_at })),
+  });
+});
+
 app.get('/api/admin/mcp', authMiddleware, requireAdmin, (req, res) => {
   res.json({
     enabled: db.getSetting('mcp_enabled') === '1',
