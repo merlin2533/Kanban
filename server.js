@@ -122,7 +122,21 @@ function parseCookies(req) {
 }
 
 // --- Auth middleware ---
+// Authenticates the request, then makes sure every board-scoped route
+// parameter (:boardId, :cardId, :columnId, …) points to a board the caller
+// may access. Routes that take board-scoped IDs from the body or from a
+// generic :id check those themselves.
 function authMiddleware(req, res, next) {
+  authenticate(req, res, () => {
+    if (!checkParamBoardAccess(req)) {
+      authLog('middleware: 403 - no access to board of', req.originalUrl);
+      return res.status(403).json({ error: 'No access to this board' });
+    }
+    next();
+  });
+}
+
+function authenticate(req, res, next) {
   authLog(`middleware: ${req.method} ${req.originalUrl}`);
   // API token (MCP) – "Authorization: Bearer kbn_..."; acts as the token's user.
   // Not sent automatically by browsers, so no CSRF header is required.
@@ -206,6 +220,42 @@ function requireBoardAccess(req, boardId) {
   // Access link users can only access their linked board
   if (req.accessLink && req.accessLink.board_id === boardId) return true;
   return false;
+}
+
+// Board a board-scoped ID belongs to (null = unknown ID; the route answers 404)
+function cardBoardId(val) {
+  const id = validId(val);
+  return id ? db.getCardBoardId(id) : null;
+}
+const PARAM_BOARD_RESOLVERS = {
+  boardId:    (v) => v,
+  cardId:     cardBoardId,
+  blockingId: cardBoardId,
+  columnId:   (v) => { const id = validId(v); return id ? db.getColumnBoardId(id) : null; },
+  itemId:     (v) => {
+    const id = validId(v);
+    const row = id ? db.getDb().prepare('SELECT card_id FROM checklist_items WHERE id = ?').get(id) : null;
+    return row ? db.getCardBoardId(row.card_id) : null;
+  },
+  commentId:  (v) => {
+    const id = validId(v);
+    const c = id ? db.getComment(id) : null;
+    return c ? db.getCardBoardId(c.card_id) : null;
+  },
+  labelId:    (v) => {
+    const id = validId(v);
+    const l = id ? db.getDb().prepare('SELECT board_id FROM labels WHERE id = ?').get(id) : null;
+    return l ? l.board_id : null;
+  },
+};
+
+function checkParamBoardAccess(req) {
+  for (const [param, resolve] of Object.entries(PARAM_BOARD_RESOLVERS)) {
+    if (req.params[param] === undefined) continue;
+    const boardId = resolve(req.params[param]);
+    if (boardId && !requireBoardAccess(req, boardId)) return false;
+  }
+  return true;
 }
 
 // --- Login rate limiting ---
@@ -1304,6 +1354,9 @@ app.post('/api/boards/:boardId/card-templates', authMiddleware, requireBoardEdit
 app.delete('/api/card-templates/:id', authMiddleware, requireBoardEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const existing = db.getDb().prepare('SELECT board_id FROM card_templates WHERE id = ?').get(id);
+  if (!existing) return res.status(404).json({ error: 'Template not found' });
+  if (!requireBoardAccess(req, existing.board_id)) return res.status(403).json({ error: 'No access to this board' });
   const tmpl = db.deleteCardTemplate(id);
   if (!tmpl) return res.status(404).json({ error: 'Template not found' });
   res.json({ ok: true });
@@ -1314,6 +1367,8 @@ app.post('/api/columns/:columnId/cards/from-template', authMiddleware, requireEd
   if (!columnId) return res.status(400).json({ error: 'Invalid ID' });
   const templateId = validId(req.body.templateId);
   if (!templateId) return res.status(400).json({ error: 'templateId required' });
+  const tmplRow = db.getDb().prepare('SELECT board_id FROM card_templates WHERE id = ?').get(templateId);
+  if (tmplRow && !requireBoardAccess(req, tmplRow.board_id)) return res.status(403).json({ error: 'No access to this board' });
   const user = getRequestUser(req);
   const card = db.createCardFromTemplate(templateId, columnId, user);
   if (!card) return res.status(404).json({ error: 'Template or column not found' });
@@ -1328,8 +1383,15 @@ app.post('/api/boards/:boardId/bulk', authMiddleware, requireEdit, (req, res) =>
   if (!requireBoardAccess(req, boardId)) return res.status(403).json({ error: 'No access' });
   const { action, cardIds, columnId, labelId } = req.body;
   if (!Array.isArray(cardIds) || cardIds.length === 0) return res.status(400).json({ error: 'cardIds required' });
-  const validatedIds = cardIds.map(id => validId(id)).filter(Boolean);
+  const validatedIds = cardIds.map(id => validId(id)).filter(id => id && db.getCardBoardId(id) === boardId);
   if (validatedIds.length === 0) return res.status(400).json({ error: 'No valid card IDs' });
+  if (action === 'move' && columnId && db.getColumnBoardId(validId(columnId)) !== boardId) {
+    return res.status(400).json({ error: 'columnId does not belong to this board' });
+  }
+  if (action === 'label' && labelId) {
+    const lbl = db.getDb().prepare('SELECT board_id FROM labels WHERE id = ?').get(validId(labelId));
+    if (!lbl || lbl.board_id !== boardId) return res.status(400).json({ error: 'labelId does not belong to this board' });
+  }
   const user = getRequestUser(req);
   try {
     if (action === 'archive') {
@@ -1403,6 +1465,8 @@ app.post('/api/cards/:cardId/labels/:labelId', authMiddleware, requireEdit, (req
   const cardId = validId(req.params.cardId);
   const labelId = validId(req.params.labelId);
   if (!cardId || !labelId) return res.status(400).json({ error: 'Invalid ID' });
+  const labelRow = db.getDb().prepare('SELECT board_id FROM labels WHERE id = ?').get(labelId);
+  if (!labelRow || labelRow.board_id !== db.getCardBoardId(cardId)) return res.status(400).json({ error: 'Label does not belong to this board' });
   db.addLabelToCard(cardId, labelId);
   const boardId = db.getCardBoardId(cardId);
   if (boardId) broadcast(boardId, { type: 'update', action: 'card_label_added' });
@@ -1435,6 +1499,9 @@ app.post('/api/cards/:cardId/attachments', authMiddleware, requireEdit, mutation
 app.get('/api/attachments/:id', authMiddleware, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const attMeta = db.getAttachment(id);
+  if (!attMeta) return res.status(404).json({ error: 'Attachment not found' });
+  if (!requireBoardAccess(req, db.getCardBoardId(attMeta.card_id))) return res.status(403).json({ error: 'No access to this board' });
   const att = db.getAttachmentData(id);
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
   if (!att.file_data) return res.status(404).json({ error: 'Attachment data not found' });
@@ -1455,6 +1522,9 @@ app.get('/api/attachments/:id', authMiddleware, (req, res) => {
 app.delete('/api/attachments/:id', authMiddleware, requireEdit, (req, res) => {
   const id = validId(req.params.id);
   if (!id) return res.status(400).json({ error: 'Invalid ID' });
+  const attMeta = db.getAttachment(id);
+  if (!attMeta) return res.status(404).json({ error: 'Attachment not found' });
+  if (!requireBoardAccess(req, db.getCardBoardId(attMeta.card_id))) return res.status(403).json({ error: 'No access to this board' });
   const att = db.deleteAttachment(id);
   if (!att) return res.status(404).json({ error: 'Attachment not found' });
   // Attachment data was stored in DB – no filesystem cleanup needed
@@ -1528,6 +1598,8 @@ app.post('/api/cards/:cardId/dependencies', authMiddleware, requireEdit, (req, r
   const id = validId(req.params.cardId);
   const blockingId = validId(req.body.blocking_card_id);
   if (!id || !blockingId) return res.status(400).json({ error: 'Invalid IDs' });
+  const blockingBoard = db.getCardBoardId(blockingId);
+  if (blockingBoard && !requireBoardAccess(req, blockingBoard)) return res.status(403).json({ error: 'No access to this board' });
   try {
     db.addCardDependency(blockingId, id);
     // get board for broadcast
