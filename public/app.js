@@ -1114,6 +1114,13 @@ document.addEventListener('DOMContentLoaded', async () => {
 });
 
 // --- API Helpers ---
+// Append the share-link token to same-origin URLs so <img>/<a> requests
+// (which cannot send custom headers) are authorised for external access.
+function withToken(url) {
+  if (!window._accessToken || !url.startsWith('/')) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(window._accessToken);
+}
+
 async function api(url, method = 'GET', body = null) {
   if (window._accessToken) {
     const separator = url.includes('?') ? '&' : '?';
@@ -1634,7 +1641,7 @@ function createCardEl(card) {
     if (img) {
       const thumb = document.createElement('img');
       thumb.className = 'card-thumbnail';
-      thumb.src = `/api/attachments/${img.id}`;
+      thumb.src = withToken(`/api/attachments/${img.id}`);
       thumb.alt = img.filename;
       div.appendChild(thumb);
     }
@@ -2620,7 +2627,7 @@ function renderAttachments(attachments) {
     if (att.mimetype && att.mimetype.startsWith('image/')) {
       const thumb = document.createElement('img');
       thumb.className = 'attachment-thumb';
-      thumb.src = `/api/attachments/${att.id}`;
+      thumb.src = withToken(`/api/attachments/${att.id}`);
       thumb.alt = att.filename;
       item.appendChild(thumb);
     } else {
@@ -2635,7 +2642,7 @@ function renderAttachments(attachments) {
 
     const name = document.createElement('a');
     name.className = 'attachment-name';
-    name.href = `/api/attachments/${att.id}`;
+    name.href = withToken(`/api/attachments/${att.id}`);
     name.textContent = att.filename;
     name.target = '_blank';
 
