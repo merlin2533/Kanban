@@ -126,6 +126,13 @@ async function checkAuth() {
 }
 
 // --- API helper ---
+// Append the share-link token to same-origin URLs so <img>/<a> requests
+// (which cannot send custom headers) are authorised for external access.
+function withToken(url) {
+  if (!window._accessToken || !url.startsWith('/')) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'token=' + encodeURIComponent(window._accessToken);
+}
+
 async function api(url, method = 'GET', body = null) {
   if (window._accessToken) {
     const sep = url.includes('?') ? '&' : '?';
@@ -229,7 +236,7 @@ function renderMarkdown(text) {
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.+?)\*/g, '<em>$1</em>')
     .replace(/`(.+?)`/g, '<code>$1</code>')
-    .replace(/!\[([^\]]*)\]\((\/(?:uploads\/|api\/attachments\/)[^)]+)\)/g, '<img src="$2" alt="$1" class="md-image">')
+    .replace(/!\[([^\]]*)\]\((\/(?:uploads\/|api\/attachments\/)[^)]+)\)/g, (m, alt, src) => `<img src="${withToken(src)}" alt="${alt}" class="md-image">`)
     .replace(/\[(.+?)\]\((https?:\/\/[^\s)"'<>]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>')
     .replace(/^- (.+)$/gm, '<li>$1</li>')
     .replace(/(<li>.*<\/li>)/s, '<ul>$1</ul>')
@@ -1114,11 +1121,11 @@ function renderAttachments(attachments) {
     if (att.mimetype && att.mimetype.startsWith('image/')) {
       const thumb = document.createElement('img');
       thumb.className = 'attachment-thumb';
-      thumb.src = `/api/attachments/${att.id}`;
+      thumb.src = withToken(`/api/attachments/${att.id}`);
       thumb.alt = att.filename;
       thumb.loading = 'lazy';
       thumb.style.cursor = 'zoom-in';
-      thumb.onclick = () => openImageLightbox(`/api/attachments/${att.id}`, att.filename);
+      thumb.onclick = () => openImageLightbox(withToken(`/api/attachments/${att.id}`), att.filename);
       item.appendChild(thumb);
     } else {
       const icon = document.createElement('div');
@@ -1140,9 +1147,9 @@ function renderAttachments(attachments) {
     name.className = 'attachment-name';
     if (isImage) {
       name.href = '#';
-      name.onclick = (e) => { e.preventDefault(); openImageLightbox(`/api/attachments/${att.id}`, att.filename); };
+      name.onclick = (e) => { e.preventDefault(); openImageLightbox(withToken(`/api/attachments/${att.id}`), att.filename); };
     } else {
-      name.href = `/api/attachments/${att.id}`;
+      name.href = withToken(`/api/attachments/${att.id}`);
       name.target = '_blank';
       name.rel = 'noopener';
     }
